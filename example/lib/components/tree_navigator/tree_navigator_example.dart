@@ -44,11 +44,11 @@ class _TreeNavigatorExamplePageState extends State<TreeNavigatorExamplePage> {
                   children: [
                     UButton(
                       child: const Text('子目录 A'),
-                      onTap: () => _navController.push('$path/A'),
+                      onPressed: () => _navController.push('$path/A'),
                     ),
                     UButton(
                       child: const Text('子目录 B'),
-                      onTap: () => _navController.push('$path/B'),
+                      onPressed: () => _navController.push('$path/B'),
                     ),
                   ],
                 ),

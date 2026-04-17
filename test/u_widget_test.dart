@@ -80,12 +80,12 @@ void main() {
   });
 
   group('UButton', () {
-    testWidgets('renders with default text', (tester) async {
+    testWidgets('renders with child', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: UTheme(
             data: UThemeData.defaultTheme(),
-            child: const Scaffold(body: UButton()),
+            child: const Scaffold(body: UButton(child: Text('Button'))),
           ),
         ),
       );
@@ -93,20 +93,7 @@ void main() {
       expect(find.text('Button'), findsOneWidget);
     });
 
-    testWidgets('renders with custom child', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: UTheme(
-            data: UThemeData.defaultTheme(),
-            child: const Scaffold(body: UButton(child: Text('Custom Text'))),
-          ),
-        ),
-      );
-
-      expect(find.text('Custom Text'), findsOneWidget);
-    });
-
-    testWidgets('calls onTap when tapped', (tester) async {
+    testWidgets('calls onPressed when tapped', (tester) async {
       bool tapped = false;
 
       await tester.pumpWidget(
@@ -115,7 +102,7 @@ void main() {
             data: UThemeData.defaultTheme(),
             child: Scaffold(
               body: UButton(
-                onTap: () => tapped = true,
+                onPressed: () => tapped = true,
                 child: const Text('Tap Me'),
               ),
             ),
@@ -136,7 +123,7 @@ void main() {
             data: UThemeData.defaultTheme(),
             child: Scaffold(
               body: UButton(
-                onLongPress: () => longPressed = true,
+                onLongPressed: () => longPressed = true,
                 child: const Text('Long Press Me'),
               ),
             ),
@@ -148,22 +135,7 @@ void main() {
       expect(longPressed, isTrue);
     });
 
-    testWidgets('applies custom color', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: UTheme(
-            data: UThemeData.defaultTheme(),
-            child: const Scaffold(
-              body: UButton(color: Colors.red, child: Text('Red Button')),
-            ),
-          ),
-        ),
-      );
-
-      expect(find.text('Red Button'), findsOneWidget);
-    });
-
-    testWidgets('renders all button variants', (tester) async {
+    testWidgets('renders different button types', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: UTheme(
@@ -171,22 +143,9 @@ void main() {
             child: Scaffold(
               body: Wrap(
                 children: [
-                  UButton(
-                    variant: UButtonVariant.filled,
-                    child: const Text('Filled'),
-                  ),
-                  UButton(
-                    variant: UButtonVariant.outlined,
-                    child: const Text('Outlined'),
-                  ),
-                  UButton(
-                    variant: UButtonVariant.text,
-                    child: const Text('Text'),
-                  ),
-                  UButton(
-                    variant: UButtonVariant.ghost,
-                    child: const Text('Ghost'),
-                  ),
+                  UButton(child: const Text('Text')),
+                  UButton(child: const Text('Filled')),
+                  UButton(child: const Text('Outlined')),
                 ],
               ),
             ),
@@ -194,42 +153,9 @@ void main() {
         ),
       );
 
+      expect(find.text('Text'), findsOneWidget);
       expect(find.text('Filled'), findsOneWidget);
       expect(find.text('Outlined'), findsOneWidget);
-      expect(find.text('Text'), findsOneWidget);
-      expect(find.text('Ghost'), findsOneWidget);
-    });
-
-    testWidgets('renders all button sizes', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: UTheme(
-            data: UThemeData.defaultTheme(),
-            child: Scaffold(
-              body: Wrap(
-                children: [
-                  UButton(
-                    size: UButtonSize.small,
-                    child: const Text('Small'),
-                  ),
-                  UButton(
-                    size: UButtonSize.medium,
-                    child: const Text('Medium'),
-                  ),
-                  UButton(
-                    size: UButtonSize.large,
-                    child: const Text('Large'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-
-      expect(find.text('Small'), findsOneWidget);
-      expect(find.text('Medium'), findsOneWidget);
-      expect(find.text('Large'), findsOneWidget);
     });
 
     testWidgets('disabled button does not respond to taps', (tester) async {
@@ -242,7 +168,7 @@ void main() {
             child: Scaffold(
               body: UButton(
                 enabled: false,
-                onTap: () => tapped = true,
+                onPressed: () => tapped = true,
                 child: const Text('Disabled Button'),
               ),
             ),

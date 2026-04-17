@@ -18,7 +18,7 @@ class ButtonExamplePage extends StatelessWidget {
         padding: EdgeInsets.all(theme.spacingMedium),
         children: [
           Text(
-            '按钮变体',
+            '按钮类型',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           SizedBox(height: theme.spacingMedium),
@@ -27,69 +27,61 @@ class ButtonExamplePage extends StatelessWidget {
             runSpacing: theme.spacingMedium,
             children: [
               UButton(
-                variant: UButtonVariant.filled,
-                child: const Text('Filled'),
+                primaryColor: Colors.transparent,
+                borderColor: Colors.transparent,
+                child: const Text('文字按钮'),
               ),
               UButton(
-                variant: UButtonVariant.outlined,
-                child: const Text('Outlined'),
+                child: const Text('默认样式'),
               ),
-              UButton(variant: UButtonVariant.text, child: const Text('Text')),
               UButton(
-                variant: UButtonVariant.ghost,
-                child: const Text('Ghost'),
+                primaryColor: Colors.transparent,
+                child: const Text('线框按钮'),
               ),
             ],
           ),
           SizedBox(height: theme.spacingLarge),
-          Text(
-            '按钮尺寸',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          SizedBox(height: theme.spacingMedium),
-          Wrap(
-            spacing: theme.spacingMedium,
-            children: [
-              UButton(size: UButtonSize.small, child: const Text('Small')),
-              UButton(size: UButtonSize.medium, child: const Text('Medium')),
-              UButton(size: UButtonSize.large, child: const Text('Large')),
-            ],
-          ),
-          SizedBox(height: theme.spacingLarge),
-          Text(
-            '自定义颜色',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          SizedBox(height: theme.spacingMedium),
-          Wrap(
-            spacing: theme.spacingMedium,
-            children: [
-              UButton(child: const Text('Blue'), color: Colors.blue),
-              UButton(child: const Text('Orange'), color: Colors.orange),
-              UButton(child: const Text('Purple'), color: Colors.purple),
-            ],
-          ),
-          SizedBox(height: theme.spacingLarge),
-          Text(
-            '交互反馈',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          SizedBox(height: theme.spacingMedium),
-          UButton(
-            child: const Text('点击我'),
-            onTap: () => _showSnackBar(context, '按钮被点击'),
-            onLongPress: () => _showSnackBar(context, '按钮被长按'),
-          ),
-          SizedBox(height: theme.spacingMedium),
           Text(
             '禁用状态',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           SizedBox(height: theme.spacingMedium),
+          Wrap(
+            spacing: theme.spacingMedium,
+            runSpacing: theme.spacingMedium,
+            children: [
+              UButton(
+                enabled: false,
+                primaryColor: Colors.transparent,
+                borderColor: Colors.transparent,
+                onPressed: () {},
+                child: const Text('文字按钮（禁用）'),
+              ),
+              UButton(enabled: false, child: const Text('默认样式（禁用）')),
+              UButton(
+                enabled: false,
+                primaryColor: Colors.transparent,
+                child: const Text('线框按钮（禁用）'),
+              ),
+            ],
+          ),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '全宽内容居中',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          UButton(child: Center(child: const Text('居中'))),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '事件交互',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
           UButton(
-            child: const Text('禁用按钮'),
-            enabled: false,
-            onTap: () => _showSnackBar(context, '按钮被点击'),
+            onPressed: () => _showSnackBar(context, '按钮被点击'),
+            onLongPressed: () => _showSnackBar(context, '按钮被长按'),
+            child: Center(child: const Text('点击或长按我')),
           ),
         ],
       ),
