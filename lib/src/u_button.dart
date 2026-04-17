@@ -26,7 +26,7 @@ class UButton extends UContainer {
   final VoidCallback? onSecondaryTap;
 
   /// 鼠标中键点击事件回调
-  final void Function(TapUpDetails)? onTertiaryTapUp;
+  final GestureTapUpCallback? onTertiaryTapUp;
 
   /// 是否启用
   final bool disable;
@@ -85,7 +85,7 @@ class UButton extends UContainer {
     VoidCallback? onTap,
     VoidCallback? onLongPress,
     VoidCallback? onSecondaryTap,
-    void Function(TapUpDetails)? onTertiaryTapUp,
+    GestureTapUpCallback? onTertiaryTapUp,
   }) {
     return MouseRegion(
       cursor: cursor,

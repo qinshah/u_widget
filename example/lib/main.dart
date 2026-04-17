@@ -8,6 +8,7 @@ import 'components/navigation_bar/navigation_bar_example.dart';
 import 'components/tree_view/tree_view_example.dart';
 import 'components/split_layout/split_layout_example.dart';
 import 'components/tree_navigator/tree_navigator_example.dart';
+import 'components/tab_bar/tab_bar_example.dart';
 
 void main() {
   runApp(const MyApp());
@@ -56,6 +57,12 @@ class DemoHomePage extends StatelessWidget {
             '输入框组件 (UInput)',
             '支持密码显示/隐藏、清除按钮等',
             () => const InputExamplePage(),
+          ),
+          _buildSection(
+            context,
+            '标签栏组件 (UTabBar)',
+            '支持多个标签页',
+            () => const TabBarExample(),
           ),
           _buildSection(
             context,
@@ -119,7 +126,7 @@ class DemoHomePage extends StatelessWidget {
           ),
         ),
         subtitle: Padding(
-          padding: EdgeInsets.only(top: theme.spacingTiny),
+          padding: EdgeInsets.only(top: theme.spacingSmall),
           child: Text(
             description,
             style: TextStyle(fontSize: 14, color: theme.secondary),
