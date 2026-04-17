@@ -20,22 +20,6 @@ class USplitLayout extends StatefulWidget {
 
 class _USplitLayoutState extends State<USplitLayout> {
   final List<ValueNotifier<double>> _sizeNotifiers = [];
-  late double _mainAxisExtent;
-
-  void _onDragDivider(int dividerIndex, Offset delta) {
-    final deltaFlex = widget.direction == Axis.horizontal
-        ? delta.dx / _mainAxisExtent
-        : delta.dy / _mainAxisExtent;
-    final currentFlex = _sizeNotifiers[dividerIndex].value;
-    final nextFlex = _sizeNotifiers[dividerIndex + 1].value;
-    final totalFlex = currentFlex + nextFlex;
-    final newCurrentFlex = (currentFlex - deltaFlex * totalFlex).clamp(
-      0.1,
-      totalFlex - 0.1,
-    );
-    _sizeNotifiers[dividerIndex].value = newCurrentFlex;
-    _sizeNotifiers[dividerIndex + 1].value = totalFlex - newCurrentFlex;
-  }
 
   @override
   void initState() {
@@ -45,28 +29,11 @@ class _USplitLayoutState extends State<USplitLayout> {
     }
   }
 
-  Widget _buildDivider(int index) {
-    return GestureDetector(
-      onPanUpdate: (details) => _onDragDivider(index, details.delta),
-      child: MouseRegion(
-        cursor: widget.direction == Axis.horizontal
-            ? SystemMouseCursors.resizeColumn
-            : SystemMouseCursors.resizeRow,
-        child:
-            widget.dividerBuilder?.call(index) ??
-            const SizedBox(width: 1, height: 1),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = UTheme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        _mainAxisExtent = widget.direction == Axis.horizontal
-            ? constraints.maxWidth
-            : constraints.maxHeight;
         return Flex(
           direction: widget.direction,
           children: [

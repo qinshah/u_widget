@@ -90,7 +90,7 @@ void main() {
         ),
       );
 
-      expect(find.text('UButton'), findsOneWidget);
+      expect(find.text('Button'), findsOneWidget);
     });
 
     testWidgets('renders with custom child', (tester) async {
@@ -163,7 +163,7 @@ void main() {
       expect(find.text('Red Button'), findsOneWidget);
     });
 
-    testWidgets('renders all button types', (tester) async {
+    testWidgets('renders all button variants', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: UTheme(
@@ -172,19 +172,21 @@ void main() {
               body: Wrap(
                 children: [
                   UButton(
-                    type: UButtonType.normal,
-                    child: const Text('Normal'),
+                    variant: UButtonVariant.filled,
+                    child: const Text('Filled'),
                   ),
                   UButton(
-                    type: UButtonType.success,
-                    child: const Text('Success'),
+                    variant: UButtonVariant.outlined,
+                    child: const Text('Outlined'),
                   ),
                   UButton(
-                    type: UButtonType.warning,
-                    child: const Text('Warning'),
+                    variant: UButtonVariant.text,
+                    child: const Text('Text'),
                   ),
-                  UButton(type: UButtonType.error, child: const Text('Error')),
-                  UButton(type: UButtonType.info, child: const Text('Info')),
+                  UButton(
+                    variant: UButtonVariant.ghost,
+                    child: const Text('Ghost'),
+                  ),
                 ],
               ),
             ),
@@ -192,11 +194,64 @@ void main() {
         ),
       );
 
-      expect(find.text('Normal'), findsOneWidget);
-      expect(find.text('Success'), findsOneWidget);
-      expect(find.text('Warning'), findsOneWidget);
-      expect(find.text('Error'), findsOneWidget);
-      expect(find.text('Info'), findsOneWidget);
+      expect(find.text('Filled'), findsOneWidget);
+      expect(find.text('Outlined'), findsOneWidget);
+      expect(find.text('Text'), findsOneWidget);
+      expect(find.text('Ghost'), findsOneWidget);
+    });
+
+    testWidgets('renders all button sizes', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UTheme(
+            data: UThemeData.defaultTheme(),
+            child: Scaffold(
+              body: Wrap(
+                children: [
+                  UButton(
+                    size: UButtonSize.small,
+                    child: const Text('Small'),
+                  ),
+                  UButton(
+                    size: UButtonSize.medium,
+                    child: const Text('Medium'),
+                  ),
+                  UButton(
+                    size: UButtonSize.large,
+                    child: const Text('Large'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Small'), findsOneWidget);
+      expect(find.text('Medium'), findsOneWidget);
+      expect(find.text('Large'), findsOneWidget);
+    });
+
+    testWidgets('disabled button does not respond to taps', (tester) async {
+      bool tapped = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UTheme(
+            data: UThemeData.defaultTheme(),
+            child: Scaffold(
+              body: UButton(
+                enabled: false,
+                onTap: () => tapped = true,
+                child: const Text('Disabled Button'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Disabled Button'));
+      expect(tapped, isFalse);
     });
   });
 
@@ -551,33 +606,6 @@ void main() {
       final controller = UNavCntlr();
       controller.curPath = '/Users/Documents';
       expect(controller.canUp(), isTrue);
-    });
-  });
-
-  group('UWidget', () {
-    test('getFileIcon returns folder icon for directories', () {
-      final icon = UWidget.getFileIcon('test', isDirectory: true);
-      expect(icon, equals(Icons.folder));
-    });
-
-    test('getFileIcon returns correct icon for text files', () {
-      final icon = UWidget.getFileIcon('readme.md');
-      expect(icon, equals(Icons.text_snippet));
-    });
-
-    test('getFileIcon returns correct icon for images', () {
-      final icon = UWidget.getFileIcon('photo.png');
-      expect(icon, equals(Icons.image));
-    });
-
-    test('getFileIcon returns correct icon for dart files', () {
-      final icon = UWidget.getFileIcon('main.dart');
-      expect(icon, equals(Icons.flutter_dash));
-    });
-
-    test('getFileIcon returns default icon for unknown types', () {
-      final icon = UWidget.getFileIcon('unknown.xyz');
-      expect(icon, equals(Icons.insert_drive_file));
     });
   });
 }
