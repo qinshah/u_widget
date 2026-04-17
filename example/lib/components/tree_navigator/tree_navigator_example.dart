@@ -31,11 +31,7 @@ class _TreeNavigatorExamplePageState extends State<TreeNavigatorExamplePage> {
       body: UTreeNavigator(
         cntlr: _navController,
         initialPath: '/home',
-        onPopRoot: () {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('已到达根目录')));
-        },
+        onPopRoot: Navigator.of(context).pop,
         widgetBuilder: (path) {
           return Center(
             child: Column(
