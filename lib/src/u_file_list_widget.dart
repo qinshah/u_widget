@@ -150,7 +150,7 @@ class _UFileListWidgetState extends State<UFileListWidget> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (widget.showDetails) ...[
-                    SizedBox(height: theme.spacingTiny),
+                    SizedBox(height: theme.spacingSmall),
                     Text(
                       '${file.type} • ${_formatDate(file.modified)}',
                       style: TextStyle(fontSize: 12, color: theme.secondary),
@@ -190,7 +190,7 @@ class _UFileListWidgetState extends State<UFileListWidget> {
           textAlign: TextAlign.center,
         ),
         if (widget.showDetails) ...[
-          SizedBox(height: theme.spacingTiny),
+          SizedBox(height: theme.spacingSmall),
           Text(
             _formatDate(file.modified),
             style: TextStyle(fontSize: 10, color: theme.secondary),

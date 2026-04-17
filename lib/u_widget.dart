@@ -9,3 +9,7 @@ export 'src/u_tree_view.dart';
 export 'src/u_split_layout.dart';
 export 'src/u_split_panel.dart';
 export 'src/u_tree_navigator.dart';
+export 'src/u_tabs/u_tab_bar.dart';
+export 'src/u_tabs/u_tab.dart';
+export 'src/u_tabs/u_tab_cntlr.dart';
+export 'src/u_container.dart';

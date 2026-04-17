@@ -1,75 +1,101 @@
 import 'package:flutter/material.dart';
 import 'package:u_design/u_design.dart';
 import 'package:u_widget/src/color_ext.dart';
+import 'package:u_widget/src/u_container.dart';
 
-class UButton extends StatelessWidget {
+class UButton extends UContainer {
   const UButton({
     super.key,
-    required this.child,
     this.onPressed,
     this.onLongPressed,
-    this.enabled = true,
-    this.primaryColor,
+    this.onSecondaryTap,
+    this.onTertiaryTapUp,
+    this.disable = false,
     this.contentColor,
-    this.borderColor,
+    super.backgroundColor,
+    super.borderColor,
+    super.padding,
+    super.radius,
+    required super.child,
   });
 
-  final Widget child;
   final VoidCallback? onPressed;
   final VoidCallback? onLongPressed;
-  final bool enabled;
-  final Color? primaryColor;
+
+  /// 鼠标右键点击事件回调
+  final VoidCallback? onSecondaryTap;
+
+  /// 鼠标中键点击事件回调
+  final void Function(TapUpDetails)? onTertiaryTapUp;
+
+  /// 是否启用
+  final bool disable;
   final Color? contentColor;
-  final Color? borderColor;
+
+  @override
+  Color getBackgroundColor(UThemeData theme) {
+    return backgroundColor ?? theme.primary;
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = UTheme.of(context);
-    Color curPrimaryColor = primaryColor ?? theme.primary;
-    Color curBorderColor = borderColor ?? theme.border;
+    Color curBackgroundColor = getBackgroundColor(theme);
+    Color curBorderColor = getBorderColor(theme);
     Color curContentColor =
         contentColor ??
-        (curPrimaryColor.isBright ? Colors.black : Colors.white);
+        (curBackgroundColor.isBright ? Colors.black : Colors.white);
     MouseCursor cursor = SystemMouseCursors.click;
     VoidCallback? curOnTap = onPressed;
     VoidCallback? curOnLongPressed = onLongPressed;
-    if (!enabled) {
-      curPrimaryColor = curPrimaryColor.setAlpha(102);
+    if (disable) {
+      curBackgroundColor = curBackgroundColor.setAlpha(102);
       curContentColor = curContentColor.setAlpha(102);
       curBorderColor = curBorderColor.setAlpha(102);
       cursor = SystemMouseCursors.forbidden;
       curOnTap = null;
       curOnLongPressed = null;
     }
-    final curChild = Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: theme.spacingLarge,
-        vertical: theme.spacingSmall,
-      ),
-      decoration: BoxDecoration(
-        color: curPrimaryColor,
-        border: Border.all(color: curBorderColor, width: 1),
-        borderRadius: BorderRadius.circular(theme.borderRadiusMedium),
-      ),
-      child: DefaultTextStyle(
-        style: TextStyle(
-          color: curContentColor,
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
+    final uContainer = UContainer.raw(
+      backgroundColor: curBackgroundColor,
+      borderColor: curBorderColor,
+      padding: getPadding(theme),
+      radius: getRadius(theme),
+      child: IconTheme(
+        data: IconThemeData(color: curContentColor),
+        child: DefaultTextStyle(
+          style: TextStyle(color: curContentColor),
+          child: child,
         ),
-        child: child,
       ),
     );
+    return raw(
+      cursor: cursor,
+      child: uContainer,
+      onTap: curOnTap,
+      onLongPress: curOnLongPressed,
+      onSecondaryTap: onSecondaryTap,
+      onTertiaryTapUp: onTertiaryTapUp,
+    );
+  }
+
+  static Widget raw({
+    required MouseCursor cursor,
+    required Widget child,
+    VoidCallback? onTap,
+    VoidCallback? onLongPress,
+    VoidCallback? onSecondaryTap,
+    void Function(TapUpDetails)? onTertiaryTapUp,
+  }) {
     return MouseRegion(
       cursor: cursor,
       child: GestureDetector(
-        onTap: curOnTap,
-        onLongPress: curOnLongPressed,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        onSecondaryTap: onSecondaryTap,
+        onTertiaryTapUp: onTertiaryTapUp,
         behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: theme.animationDuration,
-          child: curChild,
-        ),
+        child: child,
       ),
     );
   }

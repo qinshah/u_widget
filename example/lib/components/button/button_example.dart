@@ -27,7 +27,7 @@ class ButtonExamplePage extends StatelessWidget {
             runSpacing: theme.spacingMedium,
             children: [
               UButton(
-                primaryColor: Colors.transparent,
+                backgroundColor: Colors.transparent,
                 borderColor: Colors.transparent,
                 child: const Text('文字按钮'),
               ),
@@ -35,7 +35,7 @@ class ButtonExamplePage extends StatelessWidget {
                 child: const Text('默认样式'),
               ),
               UButton(
-                primaryColor: Colors.transparent,
+                backgroundColor: Colors.transparent,
                 child: const Text('线框按钮'),
               ),
             ],
@@ -51,16 +51,16 @@ class ButtonExamplePage extends StatelessWidget {
             runSpacing: theme.spacingMedium,
             children: [
               UButton(
-                enabled: false,
-                primaryColor: Colors.transparent,
+                disable: false,
+                backgroundColor: Colors.transparent,
                 borderColor: Colors.transparent,
                 onPressed: () {},
                 child: const Text('文字按钮（禁用）'),
               ),
-              UButton(enabled: false, child: const Text('默认样式（禁用）')),
+              UButton(disable: false, child: const Text('默认样式（禁用）')),
               UButton(
-                enabled: false,
-                primaryColor: Colors.transparent,
+                disable: false,
+                backgroundColor: Colors.transparent,
                 child: const Text('线框按钮（禁用）'),
               ),
             ],

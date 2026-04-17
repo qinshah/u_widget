@@ -147,7 +147,7 @@ class UNavigationBar extends StatelessWidget {
             border: InputBorder.none,
             contentPadding: EdgeInsets.symmetric(
               horizontal: theme.spacingSmall,
-              vertical: theme.spacingTiny,
+              vertical: theme.spacingSmall,
             ),
           ),
         ),

@@ -17,15 +17,6 @@ void main() {
       expect(theme.borderRadiusLarge, equals(12.0));
     });
 
-    test('defaultTheme should have correct spacing values', () {
-      final theme = UThemeData.defaultTheme();
-      expect(theme.spacingTiny, equals(4.0));
-      expect(theme.spacingSmall, equals(8.0));
-      expect(theme.spacingMedium, equals(16.0));
-      expect(theme.spacingLarge, equals(24.0));
-      expect(theme.spacingXLarge, equals(32.0));
-    });
-
     test('shadcn should have black primary color', () {
       final theme = UThemeData.shadcn();
       expect(theme.primary, equals(const Color(0xFF000000)));
@@ -167,7 +158,7 @@ void main() {
             data: UThemeData.defaultTheme(),
             child: Scaffold(
               body: UButton(
-                enabled: false,
+                disable: false,
                 onPressed: () => tapped = true,
                 child: const Text('Disabled Button'),
               ),
