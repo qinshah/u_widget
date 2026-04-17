@@ -20,10 +20,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'UWidget Demo',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
+      theme: UThemeData.defaultTheme().toMaterial(),
       home: UTheme(
         data: UThemeData.defaultTheme(),
         child: const DemoHomePage(),

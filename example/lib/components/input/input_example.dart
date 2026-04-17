@@ -27,51 +27,48 @@ class _InputExamplePageState extends State<InputExamplePage> {
         backgroundColor: theme.surface,
         foregroundColor: theme.onSurface,
       ),
-      body: Padding(
+      body: ListView(
         padding: EdgeInsets.all(theme.spacingMedium),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '基本输入框',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: theme.spacingMedium),
-            const UInput(hintText: '请输入文本'),
-            SizedBox(height: theme.spacingLarge),
-            Text(
-              '带清除按钮',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: theme.spacingMedium),
-            UInput(hintText: '输入后可清除', showClearIcon: true, cntlr: _controller),
-            SizedBox(height: theme.spacingLarge),
-            Text(
-              '密码输入框',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: theme.spacingMedium),
-            const UInput(hintText: '请输入密码', type: UInputType.password),
-            SizedBox(height: theme.spacingLarge),
-            Text(
-              '数字输入框',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: theme.spacingMedium),
-            const UInput(hintText: '请输入数字', type: UInputType.number),
-            SizedBox(height: theme.spacingLarge),
-            Text(
-              '带前缀/后缀图标',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: theme.spacingMedium),
-            const UInput(
-              hintText: '搜索',
-              prefix: Icon(Icons.search),
-              suffix: Icon(Icons.settings),
-            ),
-          ],
-        ),
+        children: [
+          Text(
+            '基本输入框',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          const UInput(hintText: '请输入文本'),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '带清除按钮',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          UInput(hintText: '输入后可清除', showClearIcon: true, cntlr: _controller),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '密码输入框',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          const UInput(hintText: '请输入密码', type: UInputType.password),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '数字输入框',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          const UInput(hintText: '请输入数字', type: UInputType.number),
+          SizedBox(height: theme.spacingLarge),
+          Text(
+            '带前缀/后缀图标',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: theme.spacingMedium),
+          const UInput(
+            hintText: '搜索',
+            prefix: Icon(Icons.search),
+            suffix: Icon(Icons.settings),
+          ),
+        ],
       ),
     );
   }
