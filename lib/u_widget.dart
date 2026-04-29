@@ -13,3 +13,4 @@ export 'src/u_tabs/u_tab_bar.dart';
 export 'src/u_tabs/u_tab.dart';
 export 'src/u_tabs/u_tab_cntlr.dart';
 export 'src/u_container.dart';
+export 'src/u_video_player.dart';

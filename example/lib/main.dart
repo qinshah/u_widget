@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:u_design/u_design.dart';
 import 'components/button/button_example.dart';
+import 'components/video_player/video_player_example.dart';
 import 'components/input/input_example.dart';
 import 'components/scroll_picker/scroll_picker_example.dart';
 import 'components/file_list/file_list_example.dart';
@@ -63,6 +64,12 @@ class DemoHomePage extends StatelessWidget {
             '标签栏组件 (UTabBar)',
             '支持多个标签页',
             () => const TabBarExample(),
+          ),
+          _buildSection(
+            context,
+            '视频播放器 (UVideoPlayer)',
+            '集成全屏切换和UI交互回调',
+            () => const VideoPlayerExample(),
           ),
           _buildSection(
             context,
