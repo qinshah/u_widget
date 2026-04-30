@@ -1,33 +1,8 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class UVideoPlayer extends StatefulWidget {
-  // UVideoPlayer copyWith({
-  //   Key? key,
-  //   WidgetBuilder? topLeft,
-  //   WidgetBuilder? topRight,
-  //   WidgetBuilder? bottomLeft,
-  //   WidgetBuilder? bottomRight,
-  //   WidgetBuilder? topCenter,
-  //   WidgetBuilder? bottomCenter,
-  //   WidgetBuilder? centerRight,
-  //   WidgetBuilder? centerLeft,
-  // }) {
-  //   return UVideoPlayer(
-  //     key: key,
-  //     aspectRatio: aspectRatio,
-  //     video: video,
-  //     topLeft: topLeft ?? this.topLeft,
-  //     topRight: topRight ?? this.topRight,
-  //     bottomLeft: bottomLeft ?? this.bottomLeft,
-  //     bottomRight: bottomRight ?? this.bottomRight,
-  //     centerRight: centerRight ?? this.centerRight,
-  //     centerLeft: centerLeft ?? this.centerLeft,
-  //     topCenter: topCenter ?? this.topCenter,
-  //     bottomCenter: bottomCenter ?? this.bottomCenter,
-  //   );
-  // }
-
   const UVideoPlayer({
     super.key,
     this.aspectRatio = 16 / 9,
@@ -39,8 +14,18 @@ class UVideoPlayer extends StatefulWidget {
     this.centerRight,
     this.centerLeft,
     this.topCenter,
-    this.bottomCenter,
+    this.progressBuilder,
+    this.onTogglePlay,
+    this.onDoubleTapDown,
+    required this.onProgressDragEnd,
+    required this.onProgressDragUpdate,
+    required this.onProgressTapDown,
+    this.hubDuration = const Duration(seconds: 3),
   });
+
+  final VoidCallback? onTogglePlay;
+
+  final GestureTapDownCallback? onDoubleTapDown;
 
   final double aspectRatio;
 
@@ -52,34 +37,61 @@ class UVideoPlayer extends StatefulWidget {
 
   final WidgetBuilder? bottomLeft;
 
+  final WidgetBuilder? progressBuilder;
+
   final WidgetBuilder? bottomRight;
 
   final WidgetBuilder? topCenter;
-
-  final WidgetBuilder? bottomCenter;
 
   final WidgetBuilder? centerRight;
 
   final WidgetBuilder? centerLeft;
 
+  final Duration hubDuration;
+
   @override
   State<UVideoPlayer> createState() => _UVideoPlayerState();
+
+  final void Function(DragEndDetails details, double progress)?
+  onProgressDragEnd;
+  final void Function(DragUpdateDetails details, double progress)?
+  onProgressDragUpdate;
+
+  final ValueChanged<double>? onProgressTapDown;
 }
 
 class _UVideoPlayerState extends State<UVideoPlayer> {
   Timer _hubTimer = Timer(Duration.zero, () {})..cancel();
 
-  void _onTap() {
-    if (_hubTimer.isActive) {
+  PointerDeviceKind? _deviceKind;
+
+  late Duration _hubDuration = widget.hubDuration;
+
+  double _progressLength = 0;
+
+  Timer _buildNewHubTimer() {
+    return Timer(_hubDuration, () {
       setState(() => _hubTimer.cancel());
-      return;
-    }
-    _hubTimer.cancel();
-    setState(() {
-      _hubTimer = Timer(const Duration(seconds: 3), () {
-        setState(() => _hubTimer.cancel());
-      });
     });
+  }
+
+  void _taggleHubTimer() => setState(() {
+    _hubTimer.isActive ? _hubTimer.cancel() : _hubTimer = _buildNewHubTimer();
+  });
+
+  void _cancelHubTimer(_) {
+    setState(() => _hubTimer.cancel());
+  }
+
+  void _resetHubTimer(_) {
+    bool wasActive = _hubTimer.isActive;
+    _hubTimer.cancel();
+    _hubTimer = _buildNewHubTimer();
+    if (!wasActive) {
+      setState(() {
+        // _hubTimer active
+      });
+    }
   }
 
   @override
@@ -99,7 +111,13 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
             child: widget.video,
           ),
         ),
-        GestureDetector(onTap: _onTap),
+        GestureDetector(
+          onDoubleTapDown: widget.onDoubleTapDown,
+          onTap: _deviceKind == PointerDeviceKind.mouse
+              ? widget.onTogglePlay
+              : _taggleHubTimer,
+          onTapDown: (details) => _deviceKind = details.kind,
+        ),
         if (_hubTimer.isActive)
           Stack(
             children: [
@@ -115,48 +133,73 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
                 top: 0,
                 left: 0,
                 right: 0,
-                child: ColoredBox(
-                  color: Colors.red,
-                  child: Row(
-                    children: [
-                      if (widget.topLeft != null) widget.topLeft!.call(context),
-                      Expanded(
-                        child: widget.topCenter == null
-                            ? SizedBox.shrink()
-                            : widget.topCenter!.call(context),
-                      ),
-                      if (widget.topRight != null)
-                        widget.topRight!.call(context),
-                    ],
-                  ),
+                child: Row(
+                  children: [
+                    if (widget.topLeft != null) widget.topLeft!.call(context),
+                    Expanded(
+                      child: widget.topCenter == null
+                          ? SizedBox.shrink()
+                          : widget.topCenter!.call(context),
+                    ),
+                    if (widget.topRight != null) widget.topRight!.call(context),
+                  ],
                 ),
               ),
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: ColoredBox(
-                  color: Colors.red,
-                  child: Row(
-                    children: [
-                      if (widget.bottomLeft != null)
-                        widget.bottomLeft!.call(context),
-                      Expanded(
-                        child: widget.bottomCenter == null
-                            ? SizedBox.shrink()
-                            : widget.bottomCenter!.call(context),
+                child: Row(
+                  children: [
+                    if (widget.bottomLeft != null)
+                      widget.bottomLeft!.call(context),
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragUpdate: (details) {
+                          _hubDuration = const Duration(days: 666);
+                          _resetHubTimer(details); // 拖动时hub显示666天(不自动隐藏)
+                          final progress =
+                              details.localPosition.dx / _progressLength;
+                          widget.onProgressDragUpdate?.call(details, progress);
+                        },
+                        onTapDown: (details) {
+                          widget.onProgressTapDown?.call(
+                            details.localPosition.dx / _progressLength,
+                          );
+                        },
+                        onHorizontalDragEnd: (details) {
+                          _hubDuration = widget.hubDuration;
+                          _resetHubTimer(details); // 拖动结束时恢复hub显示时间
+                          final progress =
+                              details.localPosition.dx / _progressLength;
+                          widget.onProgressDragEnd?.call(details, progress);
+                        },
+                        child: LayoutBuilder(
+                          builder: (context, cconstraints) {
+                            _progressLength = cconstraints.maxWidth;
+                            return IgnorePointer(
+                              child: widget.progressBuilder?.call(context),
+                            );
+                          },
+                        ),
                       ),
-                      if (widget.bottomRight != null)
-                        widget.bottomRight!.call(context),
-                    ],
-                  ),
+                    ),
+                    if (widget.bottomRight != null)
+                      widget.bottomRight!.call(context),
+                  ],
                 ),
               ),
             ],
           ),
       ],
     );
-    return _buildConstraint(context, stack);
+    return MouseRegion(
+      onEnter: _resetHubTimer,
+      onHover: _resetHubTimer,
+      onExit: _cancelHubTimer,
+      child: _buildConstraint(context, stack),
+    );
   }
 
   Widget _buildConstraint(BuildContext context, Widget child) {
