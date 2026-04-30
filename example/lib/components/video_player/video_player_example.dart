@@ -32,7 +32,7 @@ class _VideoPlayerExampleState extends State<VideoPlayerExample> {
               topRight: (_) =>
                   Row(children: [Icon(Icons.info), Icon(Icons.more_vert)]),
               topCenter: (_) => Center(child: Text('标题')),
-              bottomCenter: (_) => LinearProgressIndicator(),
+              progressBuilder: (_) => LinearProgressIndicator(),
               bottomLeft: (_) => Row(children: [Icon(Icons.play_arrow)]),
               centerLeft: (_) => Icon(Icons.lock),
               centerRight: (_) => Icon(Icons.camera),
@@ -54,7 +54,7 @@ class _VideoPlayerExampleState extends State<VideoPlayerExample> {
                               ],
                             ),
                             topCenter: (_) => Center(child: Text('标题')),
-                            bottomCenter: (_) => LinearProgressIndicator(),
+                            progressBuilder: (_) => LinearProgressIndicator(),
                             bottomLeft: (_) =>
                                 Row(children: [Icon(Icons.play_arrow)]),
                             centerLeft: (_) => Icon(Icons.lock),
@@ -67,6 +67,11 @@ class _VideoPlayerExampleState extends State<VideoPlayerExample> {
                                 ),
                               ],
                             ),
+                            onProgressDragEnd:
+                                (DragEndDetails details, double progress) {},
+                            onProgressDragUpdate:
+                                (DragUpdateDetails details, double progress) {},
+                            onProgressTapDown: (double value) {},
                           ),
                         ),
                       );
@@ -75,6 +80,10 @@ class _VideoPlayerExampleState extends State<VideoPlayerExample> {
                   ),
                 ],
               ),
+              onProgressDragEnd: (DragEndDetails details, double progress) {},
+              onProgressDragUpdate:
+                  (DragUpdateDetails details, double progress) {},
+              onProgressTapDown: (double value) {},
             ),
           ),
           Text('宽高比：$_width : $_height'),

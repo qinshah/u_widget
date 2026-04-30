@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 class UVideoPlayer extends StatefulWidget {
   const UVideoPlayer({
     super.key,
-    this.aspectRatio = 16 / 9,
+    required this.aspectRatio,
     required this.video,
     this.topLeft,
     this.topRight,
@@ -20,6 +20,7 @@ class UVideoPlayer extends StatefulWidget {
     required this.onProgressDragEnd,
     required this.onProgressDragUpdate,
     required this.onProgressTapDown,
+    this.center,
     this.hubDuration = const Duration(seconds: 3),
   });
 
@@ -47,6 +48,9 @@ class UVideoPlayer extends StatefulWidget {
 
   final WidgetBuilder? centerLeft;
 
+  /// 中心Hub, 仅在水平拖拽进度时显示, [progress] 为当前拖拽进度 0.0 ~ 1.0
+  final Widget Function(BuildContext context, double progress)? center;
+
   final Duration hubDuration;
 
   @override
@@ -69,15 +73,21 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
 
   double _progressLength = 0;
 
+  bool _isDraggingProgress = false;
+
+  double _dragProgress = 0;
+
   Timer _buildNewHubTimer() {
     return Timer(_hubDuration, () {
       setState(() => _hubTimer.cancel());
     });
   }
 
-  void _taggleHubTimer() => setState(() {
-    _hubTimer.isActive ? _hubTimer.cancel() : _hubTimer = _buildNewHubTimer();
-  });
+  void _taggleHub() {
+    setState(() {
+      _hubTimer.isActive ? _hubTimer.cancel() : _hubTimer = _buildNewHubTimer();
+    });
+  }
 
   void _cancelHubTimer(_) {
     setState(() => _hubTimer.cancel());
@@ -112,10 +122,22 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
           ),
         ),
         GestureDetector(
+          onHorizontalDragUpdate: (details) {
+            print(details);
+          },
+          onHorizontalDragEnd: (details) {
+            print(details);
+          },
+          onVerticalDragUpdate: (details) {
+            print(details);
+          },
+          onVerticalDragEnd: (details) {
+            print(details);
+          },
           onDoubleTapDown: widget.onDoubleTapDown,
           onTap: _deviceKind == PointerDeviceKind.mouse
               ? widget.onTogglePlay
-              : _taggleHubTimer,
+              : _taggleHub,
           onTapDown: (details) => _deviceKind = details.kind,
         ),
         if (_hubTimer.isActive)
@@ -129,6 +151,11 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
                 alignment: Alignment.centerRight,
                 child: widget.centerRight?.call(context),
               ),
+              if (_isDraggingProgress && widget.center != null)
+                Align(
+                  alignment: Alignment.center,
+                  child: widget.center!.call(context, _dragProgress),
+                ),
               Positioned(
                 top: 0,
                 left: 0,
@@ -161,6 +188,10 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
                           _resetHubTimer(details); // 拖动时hub显示666天(不自动隐藏)
                           final progress =
                               details.localPosition.dx / _progressLength;
+                          setState(() {
+                            _isDraggingProgress = true;
+                            _dragProgress = progress.clamp(0, 1);
+                          });
                           widget.onProgressDragUpdate?.call(details, progress);
                         },
                         onTapDown: (details) {
@@ -173,6 +204,7 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
                           _resetHubTimer(details); // 拖动结束时恢复hub显示时间
                           final progress =
                               details.localPosition.dx / _progressLength;
+                          setState(() => _isDraggingProgress = false);
                           widget.onProgressDragEnd?.call(details, progress);
                         },
                         child: LayoutBuilder(
@@ -196,7 +228,7 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
     );
     return MouseRegion(
       onEnter: _resetHubTimer,
-      onHover: _resetHubTimer,
+      onHover: _deviceKind == PointerDeviceKind.mouse ? _resetHubTimer : null,
       onExit: _cancelHubTimer,
       child: _buildConstraint(context, stack),
     );
