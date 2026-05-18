@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/src/gestures/events.dart';
 
 class UVideoPlayer extends StatefulWidget {
   const UVideoPlayer({
@@ -228,7 +229,7 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
     );
     return MouseRegion(
       onEnter: _resetHubTimer,
-      onHover: _deviceKind == PointerDeviceKind.mouse ? _resetHubTimer : null,
+      onHover: _onHover,
       onExit: _cancelHubTimer,
       child: _buildConstraint(context, stack),
     );
@@ -254,5 +255,11 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
         return child;
       },
     );
+  }
+
+  void _onHover(_) {
+    if ((_deviceKind ?? PointerDeviceKind.mouse) == PointerDeviceKind.mouse) {
+      _resetHubTimer(null);
+    }
   }
 }
