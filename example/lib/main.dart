@@ -10,6 +10,7 @@ import 'components/tree_view/tree_view_example.dart';
 import 'components/split_layout/split_layout_example.dart';
 import 'components/tree_navigator/tree_navigator_example.dart';
 import 'components/tab_bar/tab_bar_example.dart';
+import 'components/text_editor/text_editor_example.dart';
 import 'components/window/window_example.dart';
 
 void main() {
@@ -107,6 +108,12 @@ class DemoHomePage extends StatelessWidget {
             '树形导航 (UTreeNavigator)',
             '基于路径的导航控制器',
             () => const TreeNavigatorExamplePage(),
+          ),
+          _buildSection(
+            context,
+            '文本编辑器 (UTextEditor)',
+            '支持行号显示和光标位置追踪',
+            () => const TextEditorExamplePage(),
           ),
           _buildSection(
             context,

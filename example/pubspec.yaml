@@ -10,7 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   u_design:
-    path: ../../u_design
+    # path: ../u_design
+    git: https://github.com/qinshah/u_design.git
   u_widget:
     path: ..
 
