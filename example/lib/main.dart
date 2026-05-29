@@ -10,6 +10,7 @@ import 'components/tree_view/tree_view_example.dart';
 import 'components/split_layout/split_layout_example.dart';
 import 'components/tree_navigator/tree_navigator_example.dart';
 import 'components/tab_bar/tab_bar_example.dart';
+import 'components/window/window_example.dart';
 
 void main() {
   runApp(const MyApp());
@@ -106,6 +107,12 @@ class DemoHomePage extends StatelessWidget {
             '树形导航 (UTreeNavigator)',
             '基于路径的导航控制器',
             () => const TreeNavigatorExamplePage(),
+          ),
+          _buildSection(
+            context,
+            '窗口组件 (UWindow/UWindows)',
+            '支持拖拽、调整尺寸、最大化和Z轴顺序管理',
+            () => const WindowExamplePage(),
           ),
         ],
       ),

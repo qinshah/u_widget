@@ -14,3 +14,5 @@ export 'src/u_tabs/u_tab.dart';
 export 'src/u_tabs/u_tab_cntlr.dart';
 export 'src/u_container.dart';
 export 'src/u_video_player.dart';
+export 'src/u_window.dart';
+export 'src/u_windows.dart';
