@@ -10,7 +10,7 @@ class WindowExamplePage extends StatefulWidget {
 }
 
 class _WindowExamplePageState extends State<WindowExamplePage> {
-  List<WindowState> _windows = [];
+  late final UWindowsManager _manager = UWindowsManager();
   bool _showInputDialog = false;
   String _windowTitle = '';
   int _windowCount = 0;
@@ -18,57 +18,20 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
   void _createWindow() {
     if (_windowTitle.isEmpty) return;
     final windowId = 'window_${++_windowCount}';
+    _manager.addWindow(UWindowInfo(
+      id: windowId,
+      title: _windowTitle,
+      x: 50 + (_manager.windows.length % 3) * 100,
+      y: 50 + (_manager.windows.length % 3) * 80,
+      width: 500,
+      height: 350,
+      child: CounterWidget(key: ValueKey('counter_$windowId')),
+    ));
     setState(() {
-      final newWindow = WindowState(
-        id: windowId,
-        title: _windowTitle,
-        x: 50 + (_windows.length % 3) * 100,
-        y: 50 + (_windows.length % 3) * 80,
-        width: 500,
-        height: 350,
-        child: CounterWidget(key: ValueKey('counter_$windowId')),
-      );
-      _windows.add(newWindow);
       _windowTitle = '';
       _showInputDialog = false;
     });
   }
-
-  void _bringToFront(String id) {
-    setState(() {
-      final index = _windows.indexWhere((w) => w.id == id);
-      if (index >= 0 && index != _windows.length - 1) {
-        final window = _windows.removeAt(index);
-        _windows.add(window);
-      }
-    });
-  }
-
-  void _closeWindow(String id) {
-    setState(() {
-      _windows.removeWhere((w) => w.id == id);
-    });
-  }
-
-  void _moveWindow(String id, double x, double y) {
-    setState(() {
-      final index = _windows.indexWhere((w) => w.id == id);
-      if (index >= 0) {
-        _windows[index] = _windows[index].copyWith(x: x, y: y);
-      }
-    });
-  }
-
-  void _resizeWindow(String id, double width, double height) {
-    setState(() {
-      final index = _windows.indexWhere((w) => w.id == id);
-      if (index >= 0) {
-        _windows[index] = _windows[index].copyWith(width: width, height: height);
-      }
-    });
-  }
-
-
 
   Widget _buildDesktop() {
     return Container(
@@ -115,7 +78,7 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
                     const SizedBox(width: 12),
                     UButton(
                       backgroundColor: Colors.grey[700],
-                      onPressed: () => setState(() => _windows.clear()),
+                      onPressed: () => _manager.clear(),
                       child: const Row(
                         children: [
                           Icon(Icons.delete, size: 18),
@@ -125,24 +88,6 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
                       ),
                     ),
                   ],
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '窗口数量: ${_windows.length}',
-                  style: TextStyle(color: Colors.white.withOpacity(0.6)),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '提示: 点击窗口标题栏可切换焦点',
-                  style: TextStyle(color: Colors.white.withOpacity(0.4)),
                 ),
               ],
             ),
@@ -246,66 +191,23 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
         data: UThemeData.defaultTheme(),
         child: Stack(
           children: [
-            UWindows(
-              desktop: _buildDesktop(),
-              windows: _windows.map((w) => UWindowData(
-                id: w.id,
-                title: w.title,
-                x: w.x,
-                y: w.y,
-                width: w.width,
-                height: w.height,
-                child: w.child,
-                onClose: () => _closeWindow(w.id),
-                onMove: (x, y) => _moveWindow(w.id, x, y),
-                onResize: (width, height) => _resizeWindow(w.id, width, height),
-                onFocus: () => _bringToFront(w.id),
-              )).toList(),
+            // 桌面 + 窗口层 + 任务栏
+            Column(
+              children: [
+                Expanded(
+                  child: UWindows(
+                    desktop: _buildDesktop(),
+                    manager: _manager,
+                  ),
+                ),
+                // 任务栏
+                UTaskbar(manager: _manager),
+              ],
             ),
             if (_showInputDialog) _buildInputDialog(),
           ],
         ),
       ),
-    );
-  }
-}
-
-class WindowState {
-  final String id;
-  final String title;
-  final double x;
-  final double y;
-  final double width;
-  final double height;
-  final Widget child;
-
-  WindowState({
-    required this.id,
-    required this.title,
-    required this.x,
-    required this.y,
-    required this.width,
-    required this.height,
-    required this.child,
-  });
-
-  WindowState copyWith({
-    String? id,
-    String? title,
-    double? x,
-    double? y,
-    double? width,
-    double? height,
-    Widget? child,
-  }) {
-    return WindowState(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      x: x ?? this.x,
-      y: y ?? this.y,
-      width: width ?? this.width,
-      height: height ?? this.height,
-      child: child ?? this.child,
     );
   }
 }
@@ -354,7 +256,7 @@ class _CounterWidgetState extends State<CounterWidget> {
             ),
             const SizedBox(height: 24),
             const Text(
-              '移动窗口、调整大小或切换焦点，\n这个计数器值应该保持不变',
+              '移动窗口、调整大小、最大化/最小化，\n这个计数器值应该保持不变',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),

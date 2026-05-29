@@ -1,74 +1,55 @@
 import 'package:flutter/material.dart';
 import 'u_window.dart';
+import 'u_windows_manager.dart';
 
 class UWindows extends StatelessWidget {
   const UWindows({
     super.key,
     required this.desktop,
-    this.windows = const [],
+    required this.manager,
   });
 
   final Widget desktop;
-  final List<UWindowData> windows;
+  final UWindowsManager manager;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        desktop,
-        ...windows.asMap().entries.map((entry) {
-          final index = entry.key;
-          final window = entry.value;
-          if (!window.isVisible) return const SizedBox.shrink();
-          return UWindow(
-            key: ValueKey(window.id),
-            title: window.title,
-            width: window.width,
-            height: window.height,
-            x: window.x,
-            y: window.y,
-            isFocused: index == windows.length - 1,
-            onClose: window.onClose,
-            onMove: window.onMove,
-            onResize: window.onResize,
-            onFocus: window.onFocus,
-            child: window.child,
-          );
-        }),
-      ],
+    return ListenableBuilder(
+      listenable: manager,
+      builder: (context, _) {
+        final windows = manager.windows;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            desktop,
+            ...windows.asMap().entries.map((entry) {
+              final index = entry.key;
+              final window = entry.value;
+              // 最小化窗口返回0尺寸盒子
+              if (window.state == UWindowState.minimized) {
+                return const SizedBox.shrink();
+              }
+              return UWindow(
+                key: ValueKey(window.id),
+                title: window.title,
+                width: window.width,
+                height: window.height,
+                x: window.x,
+                y: window.y,
+                isFocused: index == windows.length - 1,
+                isMaximized: window.state == UWindowState.maximized,
+                onClose: () => manager.closeWindow(window.id),
+                onMove: (x, y) => manager.moveWindow(window.id, x, y),
+                onResize: (width, height) => manager.resizeWindow(window.id, width, height),
+                onFocus: () => manager.bringToFront(window.id),
+                onToggleMaximize: () => manager.toggleMaximize(window.id),
+                onMinimize: () => manager.minimizeWindow(window.id),
+                child: window.child,
+              );
+            }),
+          ],
+        );
+      },
     );
   }
-}
-
-class UWindowData {
-  final String id;
-  final String title;
-  final Widget child;
-  final double x;
-  final double y;
-  final double width;
-  final double height;
-  final bool isMaximized;
-  final bool isVisible;
-  final VoidCallback? onClose;
-  final void Function(double x, double y)? onMove;
-  final void Function(double width, double height)? onResize;
-  final VoidCallback? onFocus;
-
-  UWindowData({
-    required this.id,
-    required this.title,
-    required this.child,
-    this.x = 100,
-    this.y = 100,
-    this.width = 600,
-    this.height = 400,
-    this.isMaximized = false,
-    this.isVisible = true,
-    this.onClose,
-    this.onMove,
-    this.onResize,
-    this.onFocus,
-  });
 }

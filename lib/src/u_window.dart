@@ -12,10 +12,13 @@ class UWindow extends StatefulWidget {
     this.minHeight = 200,
     this.x = 100,
     this.y = 100,
+    this.isMaximized = false,
     this.onClose,
     this.onMove,
     this.onResize,
     this.onFocus,
+    this.onToggleMaximize,
+    this.onMinimize,
     this.isFocused = false,
   });
 
@@ -27,10 +30,13 @@ class UWindow extends StatefulWidget {
   final double minHeight;
   final double x;
   final double y;
+  final bool isMaximized;
   final VoidCallback? onClose;
   final void Function(double x, double y)? onMove;
   final void Function(double width, double height)? onResize;
   final VoidCallback? onFocus;
+  final VoidCallback? onToggleMaximize;
+  final VoidCallback? onMinimize;
   final bool isFocused;
 
   @override
@@ -42,7 +48,6 @@ class _UWindowState extends State<UWindow> {
   late double _y;
   late double _width;
   late double _height;
-  bool _isMaximized = false;
   bool _isDragging = false;
   bool _isResizing = false;
   Offset _resizeStart = Offset.zero;
@@ -85,7 +90,7 @@ class _UWindowState extends State<UWindow> {
       child: widget.child,
     );
 
-    if (_isMaximized) {
+    if (widget.isMaximized) {
       return Positioned.fill(
         child: MouseRegion(
           cursor: _isDragging
@@ -251,7 +256,7 @@ class _UWindowState extends State<UWindow> {
         widget.onFocus?.call();
       },
       onPanUpdate: (details) {
-        if (!_isDragging || _isMaximized) return;
+        if (!_isDragging || widget.isMaximized) return;
         setState(() {
           _x += details.delta.dx;
           _y += details.delta.dy;
@@ -276,8 +281,11 @@ class _UWindowState extends State<UWindow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            _buildTitleButton(Icons.minimize, () => _toggleMaximize()),
-            _buildTitleButton(Icons.maximize, () => _toggleMaximize()),
+            _buildTitleButton(Icons.minimize, widget.onMinimize),
+            _buildTitleButton(
+              widget.isMaximized ? Icons.fullscreen_exit : Icons.fullscreen,
+              widget.onToggleMaximize,
+            ),
             _buildTitleButton(Icons.close, widget.onClose),
           ],
         ),
@@ -304,12 +312,6 @@ class _UWindowState extends State<UWindow> {
     );
   }
 
-  void _toggleMaximize() {
-    setState(() {
-      _isMaximized = !_isMaximized;
-    });
-  }
-
   void _startResize(String direction, DragStartDetails details) {
     setState(() {
       _isResizing = true;
@@ -324,7 +326,7 @@ class _UWindowState extends State<UWindow> {
   }
 
   void _updateResize(DragUpdateDetails details) {
-    if (!_isResizing || _isMaximized) return;
+    if (!_isResizing || widget.isMaximized) return;
 
     final dx = details.globalPosition.dx - _resizeStart.dx;
     final dy = details.globalPosition.dy - _resizeStart.dy;

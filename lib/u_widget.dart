@@ -16,3 +16,5 @@ export 'src/u_container.dart';
 export 'src/u_video_player.dart';
 export 'src/u_window.dart';
 export 'src/u_windows.dart';
+export 'src/u_windows_manager.dart';
+export 'src/u_taskbar.dart';
