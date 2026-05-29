@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:u_design/u_design.dart';
 import 'u_window.dart';
 
 class UWindows extends StatelessWidget {
@@ -24,7 +23,6 @@ class UWindows extends StatelessWidget {
           return UWindow(
             key: ValueKey(window.id),
             title: window.title,
-            child: window.child,
             width: window.width,
             height: window.height,
             x: window.x,
@@ -34,6 +32,7 @@ class UWindows extends StatelessWidget {
             onMove: window.onMove,
             onResize: window.onResize,
             onFocus: window.onFocus,
+            child: window.child,
           );
         }),
       ],
