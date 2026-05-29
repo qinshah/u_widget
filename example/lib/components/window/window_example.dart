@@ -26,6 +26,7 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
         y: 50 + (_windows.length % 3) * 80,
         width: 500,
         height: 350,
+        child: CounterWidget(key: ValueKey('counter_$windowId')),
       );
       _windows.add(newWindow);
       _windowTitle = '';
@@ -67,27 +68,7 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
     });
   }
 
-  Widget _buildWindowContent(String title) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '这是 "$title" 窗口的内容区域',
-            style: const TextStyle(fontSize: 16),
-          ),
-          const SizedBox(height: 16),
-          const Text('您可以：'),
-          const SizedBox(height: 8),
-          const Text('• 拖动标题栏移动窗口'),
-          const Text('• 点击最大化按钮全屏'),
-          const Text('• 点击关闭按钮关闭窗口'),
-          const Text('• 点击其他窗口切换焦点'),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildDesktop() {
     return Container(
@@ -274,7 +255,7 @@ class _WindowExamplePageState extends State<WindowExamplePage> {
                 y: w.y,
                 width: w.width,
                 height: w.height,
-                child: _buildWindowContent(w.title),
+                child: w.child,
                 onClose: () => _closeWindow(w.id),
                 onMove: (x, y) => _moveWindow(w.id, x, y),
                 onResize: (width, height) => _resizeWindow(w.id, width, height),
@@ -296,6 +277,7 @@ class WindowState {
   final double y;
   final double width;
   final double height;
+  final Widget child;
 
   WindowState({
     required this.id,
@@ -304,6 +286,7 @@ class WindowState {
     required this.y,
     required this.width,
     required this.height,
+    required this.child,
   });
 
   WindowState copyWith({
@@ -313,6 +296,7 @@ class WindowState {
     double? y,
     double? width,
     double? height,
+    Widget? child,
   }) {
     return WindowState(
       id: id ?? this.id,
@@ -321,6 +305,62 @@ class WindowState {
       y: y ?? this.y,
       width: width ?? this.width,
       height: height ?? this.height,
+      child: child ?? this.child,
+    );
+  }
+}
+
+class CounterWidget extends StatefulWidget {
+  const CounterWidget({super.key});
+
+  @override
+  State<CounterWidget> createState() => _CounterWidgetState();
+}
+
+class _CounterWidgetState extends State<CounterWidget> {
+  int _counter = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              '计数器状态保持测试',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '$_counter',
+              style: const TextStyle(fontSize: 64, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove, size: 32),
+                  onPressed: () => setState(() => _counter--),
+                ),
+                const SizedBox(width: 24),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 32),
+                  onPressed: () => setState(() => _counter++),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              '移动窗口、调整大小或切换焦点，\n这个计数器值应该保持不变',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

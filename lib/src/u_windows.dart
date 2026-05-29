@@ -17,8 +17,9 @@ class UWindows extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         desktop,
-        ...windows.map((window) {
-          final index = windows.indexOf(window);
+        ...windows.asMap().entries.map((entry) {
+          final index = entry.key;
+          final window = entry.value;
           if (!window.isVisible) return const SizedBox.shrink();
           return UWindow(
             key: ValueKey(window.id),

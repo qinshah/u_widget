@@ -52,6 +52,9 @@ class _UWindowState extends State<UWindow> {
   double _resizeStartY = 0;
   String _resizeDirection = '';
 
+  // GlobalKey 用于保持窗口内容状态，无论外部结构如何变化
+  late final GlobalKey _contentKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +78,13 @@ class _UWindowState extends State<UWindow> {
   @override
   Widget build(BuildContext context) {
     _theme = UTheme.of(context);
+
+    // 使用 GlobalKey 包裹内容，确保最大化/最小化时状态不丢失
+    final content = KeyedSubtree(
+      key: _contentKey,
+      child: widget.child,
+    );
+
     if (_isMaximized) {
       return Positioned.fill(
         child: MouseRegion(
@@ -94,7 +104,7 @@ class _UWindowState extends State<UWindow> {
             child: Column(
               children: [
                 _buildTitleBar(_theme),
-                Expanded(child: widget.child),
+                Expanded(child: content),
               ],
             ),
           ),
@@ -131,7 +141,7 @@ class _UWindowState extends State<UWindow> {
             child: Column(
               children: [
                 _buildTitleBar(_theme),
-                Expanded(child: widget.child),
+                Expanded(child: content),
               ],
             ),
           ),
@@ -227,7 +237,7 @@ class _UWindowState extends State<UWindow> {
           onPanStart: (details) => _startResize(direction, details),
           onPanUpdate: _updateResize,
           onPanEnd: _endResize,
-          child: Container(color: _theme.primary, width: width, height: height),
+          child: Container(color: Colors.transparent, width: width, height: height),
         ),
       ),
     );
