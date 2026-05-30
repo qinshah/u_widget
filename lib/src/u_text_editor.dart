@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,7 +37,7 @@ class UTextEditor extends StatefulWidget {
 
 class _UTextEditorState extends State<UTextEditor>
     with WidgetsBindingObserver
-    implements TextInputClient {
+    implements TextInputClient, TextSelectionDelegate {
   late final TextEditingController _cntlr;
   late final FocusNode _focusNode;
   final ScrollController _scrollController = ScrollController();
@@ -48,12 +47,14 @@ class _UTextEditorState extends State<UTextEditor>
   bool _cursorVisibilityNotifier = true;
   bool _hasFocus = false;
 
+  int _batchEditDepth = 0;
+  TextEditingValue? _lastKnownRemoteTextEditingValue;
+
   double _viewportHeight = 0;
   double _viewportWidth = 0;
   double _lineHeightPx = 0;
 
   late TextStyle _textStyle;
-  late ui.TextStyle _uiTextStyle;
   late TextStyle _lineNumberStyle;
   Color _textColor = Colors.black;
   Color _lineNumberColor = Colors.grey;
@@ -122,23 +123,12 @@ class _UTextEditorState extends State<UTextEditor>
       height: widget.lineHeight,
       color: _textColor,
     );
-    _uiTextStyle = ui.TextStyle(
-      fontFamily: 'monospace',
-      fontSize: widget.fontSize,
-      height: widget.lineHeight,
-      color: _textColor,
-    );
     _lineNumberStyle = TextStyle(
       fontFamily: 'monospace',
       fontSize: widget.fontSize,
       height: widget.lineHeight,
       color: _lineNumberColor,
     );
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
   }
 
   @override
@@ -164,8 +154,17 @@ class _UTextEditorState extends State<UTextEditor>
     _lastTextForCache = '';
   }
 
-  void _didChangeTextEditingValue() {
+  void _beginBatchEdit() {
+    _batchEditDepth += 1;
+  }
+
+  void _endBatchEdit() {
+    _batchEditDepth -= 1;
+    assert(_batchEditDepth >= 0, 'Unbalanced call to _endBatchEdit');
     _updateRemoteEditingValueIfNeeded();
+  }
+
+  void _didChangeTextEditingValue() {
     if (mounted) setState(() {});
     widget.onChanged?.call(_cntlr.text);
   }
@@ -218,19 +217,23 @@ class _UTextEditorState extends State<UTextEditor>
       )
       ..setEditingState(localValue)
       ..show();
+    _lastKnownRemoteTextEditingValue = localValue;
   }
 
   void _closeInputConnectionIfNeeded() {
     if (_hasInputConnection) {
       _textInputConnection!.close();
       _textInputConnection = null;
+      _lastKnownRemoteTextEditingValue = null;
     }
   }
 
   void _updateRemoteEditingValueIfNeeded() {
-    if (!_hasInputConnection) return;
+    if (_batchEditDepth > 0 || !_hasInputConnection) return;
     final localValue = _value;
+    if (localValue == _lastKnownRemoteTextEditingValue) return;
     _textInputConnection?.setEditingState(localValue);
+    _lastKnownRemoteTextEditingValue = localValue;
   }
 
   void requestKeyboard() {
@@ -288,14 +291,30 @@ class _UTextEditorState extends State<UTextEditor>
     }
   }
 
+  // ===================== TextInputClient =====================
+
   @override
   TextEditingValue? get currentTextEditingValue => _value;
 
   @override
-  void updateEditingValue(TextEditingValue value) {
-    final localValue = _value;
-    if (value == localValue) return;
+  void userUpdateTextEditingValue(
+    TextEditingValue value,
+    SelectionChangedCause? cause,
+  ) {
+    if (value == _value) return;
+    _beginBatchEdit();
     _cntlr.value = value;
+    _endBatchEdit();
+    _restartCursorBlink();
+    _ensureCursorVisible();
+  }
+
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    if (value == _value) return;
+    _beginBatchEdit();
+    _cntlr.value = value;
+    _endBatchEdit();
     _restartCursorBlink();
     _ensureCursorVisible();
   }
@@ -314,6 +333,7 @@ class _UTextEditorState extends State<UTextEditor>
     if (_hasInputConnection) {
       _textInputConnection?.connectionClosedReceived();
       _textInputConnection = null;
+      _lastKnownRemoteTextEditingValue = null;
       _focusNode.unfocus();
     }
   }
@@ -347,73 +367,247 @@ class _UTextEditorState extends State<UTextEditor>
   @override
   void performSelector(String selectorName) {}
 
-  void _restartCursorBlink() {
-    if (!_hasFocus) return;
-    _cursorVisibilityNotifier = true;
-    _startCursorBlink();
+  // ===================== TextSelectionDelegate =====================
+
+  @override
+  TextEditingValue get textEditingValue => _cntlr.value;
+
+  @override
+  void cutSelection(SelectionChangedCause cause) {
+    final selection = _cntlr.selection;
+    if (selection.isCollapsed) return;
+    final text = _cntlr.text.substring(selection.start, selection.end);
+    Clipboard.setData(ClipboardData(text: text));
+    _handleDelete(true);
   }
 
-  void _onTapDown(TapDownDetails details) {
-    requestKeyboard();
-    final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
+  @override
+  Future<void> pasteText(SelectionChangedCause cause) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text == null) return;
+    _insertText(data!.text!);
   }
 
-  void _onPanStart(DragStartDetails details) {
-    final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
+  @override
+  void selectAll(SelectionChangedCause cause) {
+    if (_cntlr.text.isEmpty) return;
+    _cntlr.selection = TextSelection(baseOffset: 0, extentOffset: _cntlr.text.length);
   }
 
-  void _onPanUpdate(DragUpdateDetails details) {
-    final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
+  @override
+  void copySelection(SelectionChangedCause cause) {
+    final selection = _cntlr.selection;
+    if (selection.isCollapsed) return;
+    final text = _cntlr.text.substring(selection.start, selection.end);
+    Clipboard.setData(ClipboardData(text: text));
   }
 
-  void _setCursor((int line, int column) pos) {
-    int offset = 0;
-    final lines = _cntlr.text.split('\n');
-    for (int i = 0; i < pos.$1 && i < lines.length; i++) {
-      offset += lines[i].length + 1;
-    }
-    offset += pos.$2;
-    offset = offset.clamp(0, _cntlr.text.length);
-    _cntlr.selection = TextSelection.collapsed(offset: offset);
+  @override
+  void hideToolbar([bool hideHandles = true]) {}
+
+  @override
+  void bringIntoView(TextPosition position) {
+    _ensureCursorVisible();
   }
 
-  (int line, int column) _offsetToPosition(Offset offset) {
-    double dx = offset.dx - _padding.left;
-    if (widget.showLineNumbers) dx -= widget.lineNumberWidth;
-    double dy = offset.dy - _padding.top + _scrollOffset;
+  @override
+  bool get cutEnabled => true;
 
-    final lines = _cntlr.text.split('\n');
-    int line = (dy / _lineHeightPx).floor().clamp(0, lines.length - 1);
+  @override
+  bool get copyEnabled => true;
 
-    final painter = _getOrCreateLinePainter(line, lines[line]);
-    if (painter == null) return (line, 0);
+  @override
+  bool get pasteEnabled => true;
 
-    final pos = painter.getPositionForOffset(Offset(dx, _lineHeightPx / 2));
-    return (line, pos.offset.clamp(0, lines[line].length));
-  }
+  @override
+  bool get selectAllEnabled => true;
 
-  TextPainter? _getOrCreateLinePainter(int lineIndex, String lineText) {
-    if (_lastTextForCache != _cntlr.text) {
-      _clearPainterCache();
-      _lastTextForCache = _cntlr.text;
-    }
-    if (_linePainterCache.containsKey(lineIndex)) {
-      return _linePainterCache[lineIndex]!;
-    }
-    final painter = TextPainter(
-      text: TextSpan(text: lineText, style: _textStyle),
-      textDirection: TextDirection.ltr,
+  @override
+  bool get lookUpEnabled => true;
+
+  @override
+  bool get searchWebEnabled => true;
+
+  @override
+  bool get shareEnabled => true;
+
+  @override
+  bool get liveTextInputEnabled => false;
+
+  // ===================== Actions 和快捷键处理 =====================
+
+  void _handleReplaceText(ReplaceTextIntent intent) {
+    final newValue = intent.currentTextEditingValue.replaced(
+      intent.replacementRange,
+      intent.replacementText,
     );
-    painter.layout(maxWidth: _textWidth);
-    _linePainterCache[lineIndex] = painter;
-    return painter;
+    userUpdateTextEditingValue(newValue, intent.cause);
   }
 
-  void _onKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
+  void _handleUpdateSelection(UpdateSelectionIntent intent) {
+    if (intent.newSelection == _cntlr.selection) return;
+    userUpdateTextEditingValue(
+      intent.currentTextEditingValue.copyWith(selection: intent.newSelection),
+      intent.cause,
+    );
+  }
+
+  void _handleDeleteIntent(DeleteCharacterIntent intent) {
+    final text = _cntlr.text;
+    final selection = _cntlr.selection;
+
+    int start;
+    int end;
+
+    if (selection.isCollapsed) {
+      start = selection.baseOffset;
+      end = selection.baseOffset;
+    } else {
+      start = selection.start;
+      end = selection.end;
+    }
+
+    if (intent.forward) {
+      if (end >= text.length) return;
+      end += 1;
+    } else {
+      if (start <= 0) return;
+      start -= 1;
+    }
+
+    start = start.clamp(0, text.length);
+    end = end.clamp(0, text.length);
+
+    final newText = '${text.substring(0, start)}${text.substring(end)}';
+    final newOffset = start;
+    userUpdateTextEditingValue(
+      TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: newOffset),
+      ),
+      SelectionChangedCause.keyboard,
+    );
+  }
+
+  void _handleDirectionalFocus(DirectionalFocusIntent intent) {
+    primaryFocus?.focusInDirection(intent.direction);
+  }
+
+  void _handleExtendSelectionByCharacter(ExtendSelectionByCharacterIntent intent) {
+    final text = _cntlr.text;
+    final selection = _cntlr.selection;
+    if (!selection.isValid) return;
+
+    int newOffset;
+    if (intent.forward) {
+      if (selection.baseOffset >= text.length) return;
+      newOffset = selection.baseOffset + 1;
+    } else {
+      if (selection.baseOffset <= 0) return;
+      newOffset = selection.baseOffset - 1;
+    }
+
+    if (intent.collapseSelection) {
+      userUpdateTextEditingValue(
+        _cntlr.value.copyWith(selection: TextSelection.collapsed(offset: newOffset)),
+        SelectionChangedCause.keyboard,
+      );
+    } else {
+      userUpdateTextEditingValue(
+        _cntlr.value.copyWith(
+          selection: TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+        ),
+        SelectionChangedCause.keyboard,
+      );
+    }
+  }
+
+  void _handleExtendSelectionVertically(ExtendSelectionVerticallyToAdjacentLineIntent intent) {
+    final text = _cntlr.text;
+    final lines = text.split('\n');
+    final cl = _cursorLine;
+    final cc = _cursorColumn;
+    int newOffset;
+
+    if (intent.forward) {
+      if (cl >= lines.length - 1) {
+        newOffset = text.length;
+      } else {
+        final newCol = cc.clamp(0, lines[cl + 1].length);
+        newOffset = 0;
+        for (int i = 0; i <= cl; i++) {
+          newOffset += lines[i].length + 1;
+        }
+        newOffset += newCol;
+      }
+    } else {
+      if (cl <= 0) {
+        newOffset = 0;
+      } else {
+        final newCol = cc.clamp(0, lines[cl - 1].length);
+        newOffset = 0;
+        for (int i = 0; i < cl - 1; i++) {
+          newOffset += lines[i].length + 1;
+        }
+        newOffset += newCol;
+      }
+    }
+
+    newOffset = newOffset.clamp(0, text.length);
+    final currentOffset = _cntlr.selection.baseOffset;
+    if (newOffset == currentOffset) return;
+
+    if (intent.collapseSelection) {
+      userUpdateTextEditingValue(
+        _cntlr.value.copyWith(selection: TextSelection.collapsed(offset: newOffset)),
+        SelectionChangedCause.keyboard,
+      );
+    } else {
+      userUpdateTextEditingValue(
+        _cntlr.value.copyWith(
+          selection: TextSelection(baseOffset: currentOffset, extentOffset: newOffset),
+        ),
+        SelectionChangedCause.keyboard,
+      );
+    }
+    _ensureCursorVisible();
+  }
+
+  void _handleCopyIntent(CopySelectionTextIntent intent) async {
+    final selection = _cntlr.selection;
+    if (selection.isCollapsed) return;
+    final text = _cntlr.text.substring(selection.start, selection.end);
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  void _handlePasteIntent(PasteTextIntent intent) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text == null) return;
+    final text = data!.text!;
+    final sel = _cntlr.selection;
+    final fullText = _cntlr.text;
+    final newText = '${fullText.substring(0, sel.start)}$text${fullText.substring(sel.end)}';
+    final newValue = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: sel.start + text.length),
+    );
+    userUpdateTextEditingValue(newValue, intent.cause);
+  }
+
+  void _handleSelectAllIntent(SelectAllTextIntent intent) {
+    if (_cntlr.text.isEmpty) return;
+    userUpdateTextEditingValue(
+      _cntlr.value.copyWith(
+        selection: TextSelection(baseOffset: 0, extentOffset: _cntlr.text.length),
+      ),
+      intent.cause,
+    );
+  }
+
+  // ===================== 键盘事件处理 =====================
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
     final logical = event.logicalKey;
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
@@ -430,7 +624,7 @@ class _UTextEditorState extends State<UTextEditor>
         );
       }
       _ensureCursorVisible();
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.arrowRight) {
       if (isCtrl) {
@@ -441,7 +635,7 @@ class _UTextEditorState extends State<UTextEditor>
         );
       }
       _ensureCursorVisible();
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.arrowUp) {
       final line = _cursorLine;
@@ -453,7 +647,7 @@ class _UTextEditorState extends State<UTextEditor>
         _cntlr.selection = TextSelection.collapsed(offset: math.max(0, newOffset));
       }
       _ensureCursorVisible();
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.arrowDown) {
       final line = _cursorLine;
@@ -467,61 +661,81 @@ class _UTextEditorState extends State<UTextEditor>
         );
       }
       _ensureCursorVisible();
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.home) {
       _cntlr.selection = TextSelection.collapsed(offset: oldOffset - _cursorColumn);
-      return;
+      _ensureCursorVisible();
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.end) {
       final lines = text.split('\n');
       _cntlr.selection = TextSelection.collapsed(
         offset: oldOffset - _cursorColumn + lines[_cursorLine].length,
       );
-      return;
+      _ensureCursorVisible();
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.backspace || logical == LogicalKeyboardKey.delete) {
       _handleDelete(logical == LogicalKeyboardKey.delete);
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.enter || logical == LogicalKeyboardKey.numpadEnter) {
       _insertNewline();
-      return;
+      return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.tab) {
       _insertText('  ');
-      return;
+      return KeyEventResult.handled;
     }
     if (isCtrl && logical == LogicalKeyboardKey.keyC) {
       _copy();
-      return;
+      return KeyEventResult.handled;
     }
     if (isCtrl && logical == LogicalKeyboardKey.keyV) {
       _paste();
-      return;
+      return KeyEventResult.handled;
     }
     if (isCtrl && logical == LogicalKeyboardKey.keyX) {
       _copy();
-      return;
+      _handleDelete(true);
+      return KeyEventResult.handled;
     }
+    return KeyEventResult.ignored;
   }
 
   void _handleDelete(bool forward) {
     final text = _cntlr.text;
-    final offset = _cntlr.selection.baseOffset;
-    if (forward) {
-      if (offset >= text.length) return;
-      _cntlr.value = TextEditingValue(
-        text: text.substring(0, offset) + text.substring(offset + 1),
-        selection: TextSelection.collapsed(offset: offset),
-      );
+    final selection = _cntlr.selection;
+
+    int start;
+    int end;
+
+    if (selection.isCollapsed) {
+      start = selection.baseOffset;
+      end = selection.baseOffset;
     } else {
-      if (offset <= 0) return;
-      _cntlr.value = TextEditingValue(
-        text: text.substring(0, offset - 1) + text.substring(offset),
-        selection: TextSelection.collapsed(offset: offset - 1),
-      );
+      start = selection.start;
+      end = selection.end;
     }
+
+    if (forward) {
+      if (end >= text.length) return;
+      end += 1;
+    } else {
+      if (start <= 0) return;
+      start -= 1;
+    }
+
+    start = start.clamp(0, text.length);
+    end = end.clamp(0, text.length);
+
+    final newText = '${text.substring(0, start)}${text.substring(end)}';
+    final newOffset = start;
+    _cntlr.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newOffset),
+    );
   }
 
   void _insertNewline() {
@@ -569,7 +783,10 @@ class _UTextEditorState extends State<UTextEditor>
   }
 
   void _copy() async {
-    await Clipboard.setData(ClipboardData(text: _cntlr.text));
+    final selection = _cntlr.selection;
+    if (selection.isCollapsed) return;
+    final text = _cntlr.text.substring(selection.start, selection.end);
+    await Clipboard.setData(ClipboardData(text: text));
   }
 
   void _paste() async {
@@ -578,6 +795,79 @@ class _UTextEditorState extends State<UTextEditor>
     _insertText(data!.text!);
   }
 
+  void _restartCursorBlink() {
+    if (!_hasFocus) return;
+    _cursorVisibilityNotifier = true;
+    _startCursorBlink();
+  }
+
+  // ===================== 手势 =====================
+
+  void _onTapDown(TapDownDetails details) {
+    requestKeyboard();
+    final pos = _offsetToPosition(details.localPosition);
+    _setCursor(pos);
+  }
+
+  void _onPanStart(DragStartDetails details) {
+    final pos = _offsetToPosition(details.localPosition);
+    _setCursor(pos);
+  }
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    final pos = _offsetToPosition(details.localPosition);
+    _setCursor(pos);
+  }
+
+  void _setCursor((int line, int column) pos) {
+    int offset = 0;
+    final lines = _cntlr.text.split('\n');
+    for (int i = 0; i < pos.$1 && i < lines.length; i++) {
+      offset += lines[i].length + 1;
+    }
+    offset += pos.$2;
+    offset = offset.clamp(0, _cntlr.text.length);
+    _beginBatchEdit();
+    _cntlr.selection = TextSelection.collapsed(offset: offset);
+    _endBatchEdit();
+    _restartCursorBlink();
+    _ensureCursorVisible();
+  }
+
+  (int line, int column) _offsetToPosition(Offset offset) {
+    double dx = offset.dx - _padding.left;
+    if (widget.showLineNumbers) dx -= widget.lineNumberWidth;
+    double dy = offset.dy - _padding.top + _scrollOffset;
+
+    final lines = _cntlr.text.split('\n');
+    int line = (dy / _lineHeightPx).floor().clamp(0, lines.length - 1);
+
+    final painter = _getOrCreateLinePainter(line, lines[line]);
+    if (painter == null) return (line, 0);
+
+    final pos = painter.getPositionForOffset(Offset(dx, _lineHeightPx / 2));
+    return (line, pos.offset.clamp(0, lines[line].length));
+  }
+
+  TextPainter? _getOrCreateLinePainter(int lineIndex, String lineText) {
+    if (_lastTextForCache != _cntlr.text) {
+      _clearPainterCache();
+      _lastTextForCache = _cntlr.text;
+    }
+    if (_linePainterCache.containsKey(lineIndex)) {
+      return _linePainterCache[lineIndex]!;
+    }
+    final painter = TextPainter(
+      text: TextSpan(text: lineText, style: _textStyle),
+      textDirection: TextDirection.ltr,
+    );
+    painter.layout(maxWidth: _textWidth);
+    _linePainterCache[lineIndex] = painter;
+    return painter;
+  }
+
+  // ===================== Build =====================
+
   @override
   Widget build(BuildContext context) {
     final theme = UTheme.of(context);
@@ -585,60 +875,95 @@ class _UTextEditorState extends State<UTextEditor>
       _clearPainterCache();
       _lastTextForCache = _cntlr.text;
     }
-    return Focus(
-      focusNode: _focusNode,
-      onKeyEvent: (_, event) {
-        _onKeyEvent(event);
-        return KeyEventResult.handled;
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        DoNothingAndStopPropagationTextIntent: DoNothingAction(consumesKey: false),
+        ReplaceTextIntent: CallbackAction<ReplaceTextIntent>(
+          onInvoke: _handleReplaceText,
+        ),
+        UpdateSelectionIntent: CallbackAction<UpdateSelectionIntent>(
+          onInvoke: _handleUpdateSelection,
+        ),
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+          onInvoke: _handleDirectionalFocus,
+        ),
+        DismissIntent: CallbackAction<DismissIntent>(
+          onInvoke: (_) {
+            _focusNode.unfocus();
+            return null;
+          },
+        ),
+        DeleteCharacterIntent: CallbackAction<DeleteCharacterIntent>(
+          onInvoke: _handleDeleteIntent,
+        ),
+        ExtendSelectionByCharacterIntent: CallbackAction<ExtendSelectionByCharacterIntent>(
+          onInvoke: _handleExtendSelectionByCharacter,
+        ),
+        ExtendSelectionVerticallyToAdjacentLineIntent: CallbackAction<ExtendSelectionVerticallyToAdjacentLineIntent>(
+          onInvoke: _handleExtendSelectionVertically,
+        ),
+        SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+          onInvoke: _handleSelectAllIntent,
+        ),
+        CopySelectionTextIntent: CallbackAction<CopySelectionTextIntent>(
+          onInvoke: _handleCopyIntent,
+        ),
+        PasteTextIntent: CallbackAction<PasteTextIntent>(
+          onInvoke: _handlePasteIntent,
+        ),
       },
-      child: Column(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTapDown: _onTapDown,
-              onPanStart: _onPanStart,
-              onPanUpdate: _onPanUpdate,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  _viewportHeight = constraints.maxHeight;
-                  _viewportWidth = constraints.maxWidth;
-                  return SingleChildScrollView(
-                    controller: _scrollController,
-                    child: SizedBox(
-                      height: math.max(_contentHeight + _padding.vertical, _viewportHeight),
-                      width: double.infinity,
-                      child: CustomPaint(
-                        size: Size(
-                          _viewportWidth,
-                          math.max(_contentHeight + _padding.vertical, _viewportHeight),
-                        ),
-                        painter: _EditorPainter(
-                          controller: _cntlr,
-                          cursorVisible: _cursorVisibilityNotifier && _hasFocus,
-                          textStyle: _textStyle,
-                          lineHeight: _lineHeightPx,
-                          padding: _padding,
-                          scrollOffset: _scrollOffset,
-                          viewportHeight: _viewportHeight,
-                          textColor: _textColor,
-                          showLineNumbers: widget.showLineNumbers,
-                          lineNumberWidth: widget.lineNumberWidth,
-                          lineNumberStyle: _lineNumberStyle,
-                          lineNumberCurrentColor: _lineNumberCurrentColor,
-                          lineNumberColor: _lineNumberColor,
-                          textWidth: _textWidth,
-                          getOrCreateLinePainter: _getOrCreateLinePainter,
+      child: Focus(
+        focusNode: _focusNode,
+        onKeyEvent: _onKeyEvent,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTapDown: _onTapDown,
+          onPanStart: _onPanStart,
+          onPanUpdate: _onPanUpdate,
+          child: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    _viewportHeight = constraints.maxHeight;
+                    _viewportWidth = constraints.maxWidth;
+                    return SingleChildScrollView(
+                      controller: _scrollController,
+                      child: SizedBox(
+                        height: math.max(_contentHeight + _padding.vertical, _viewportHeight),
+                        width: double.infinity,
+                        child: CustomPaint(
+                          size: Size(
+                            _viewportWidth,
+                            math.max(_contentHeight + _padding.vertical, _viewportHeight),
+                          ),
+                          painter: _EditorPainter(
+                            controller: _cntlr,
+                            cursorVisible: _cursorVisibilityNotifier && _hasFocus,
+                            textStyle: _textStyle,
+                            lineHeight: _lineHeightPx,
+                            padding: _padding,
+                            scrollOffset: _scrollOffset,
+                            viewportHeight: _viewportHeight,
+                            textColor: _textColor,
+                            showLineNumbers: widget.showLineNumbers,
+                            lineNumberWidth: widget.lineNumberWidth,
+                            lineNumberStyle: _lineNumberStyle,
+                            lineNumberCurrentColor: _lineNumberCurrentColor,
+                            lineNumberColor: _lineNumberColor,
+                            textWidth: _textWidth,
+                            getOrCreateLinePainter: _getOrCreateLinePainter,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
+              if (widget.showStatusBar) _buildStatusBar(theme),
+            ],
           ),
-          if (widget.showStatusBar) _buildStatusBar(theme),
-        ],
+        ),
       ),
     );
   }
@@ -666,6 +991,8 @@ class _UTextEditorState extends State<UTextEditor>
     );
   }
 }
+
+// ===================== Editor Painter =====================
 
 class _EditorPainter extends CustomPainter {
   final TextEditingController controller;
