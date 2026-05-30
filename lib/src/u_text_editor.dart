@@ -37,27 +37,30 @@ class UTextEditor extends StatefulWidget {
 }
 
 class _UTextEditorState extends State<UTextEditor>
+    with WidgetsBindingObserver
     implements TextInputClient {
   late final TextEditingController _cntlr;
   late final FocusNode _focusNode;
   final ScrollController _scrollController = ScrollController();
 
-  TextInputConnection? _inputConnection;
+  TextInputConnection? _textInputConnection;
   Timer? _cursorTimer;
-  bool _cursorVisible = true;
+  bool _cursorVisibilityNotifier = true;
+  bool _hasFocus = false;
 
   double _viewportHeight = 0;
   double _viewportWidth = 0;
   double _lineHeightPx = 0;
 
+  late TextStyle _textStyle;
   late ui.TextStyle _uiTextStyle;
   late TextStyle _lineNumberStyle;
   Color _textColor = Colors.black;
   Color _lineNumberColor = Colors.grey;
   Color _lineNumberCurrentColor = Colors.blue;
-  Color _surfaceColor = Colors.white;
 
-  final Map<int, ui.Paragraph> _paragraphCache = {};
+  final Map<int, TextPainter> _linePainterCache = {};
+  String _lastTextForCache = '';
 
   EdgeInsets get _padding =>
       widget.padding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
@@ -75,14 +78,34 @@ class _UTextEditorState extends State<UTextEditor>
     return '\n'.allMatches(_cntlr.text).length + 1;
   }
 
+  int get _cursorLine {
+    final offset = _cntlr.selection.baseOffset;
+    if (offset < 0) return 0;
+    final before = _cntlr.text.substring(0, math.min(offset, _cntlr.text.length));
+    return '\n'.allMatches(before).length;
+  }
+
+  int get _cursorColumn {
+    final offset = _cntlr.selection.baseOffset;
+    if (offset <= 0) return 0;
+    final lastNewline = _cntlr.text.lastIndexOf('\n', offset - 1);
+    return offset - (lastNewline + 1);
+  }
+
+  bool get _hasInputConnection =>
+      _textInputConnection != null && _textInputConnection!.attached;
+
+  TextEditingValue get _value => _cntlr.value;
+
   @override
   void initState() {
     super.initState();
     _cntlr = widget.cntlr ?? TextEditingController(text: widget.initialText);
     _focusNode = widget.focusNode ?? FocusNode();
-    _cntlr.addListener(_onControllerChanged);
-    _focusNode.addListener(_onFocusChange);
+    _cntlr.addListener(_didChangeTextEditingValue);
+    _focusNode.addListener(_handleFocusChanged);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -92,8 +115,13 @@ class _UTextEditorState extends State<UTextEditor>
     _textColor = theme.onSurface;
     _lineNumberColor = theme.secondary;
     _lineNumberCurrentColor = theme.primary;
-    _surfaceColor = theme.surface;
     _lineHeightPx = widget.fontSize * widget.lineHeight;
+    _textStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: widget.fontSize,
+      height: widget.lineHeight,
+      color: _textColor,
+    );
     _uiTextStyle = ui.TextStyle(
       fontFamily: 'monospace',
       fontSize: widget.fontSize,
@@ -109,77 +137,69 @@ class _UTextEditorState extends State<UTextEditor>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+  }
+
+  @override
   void dispose() {
-    _cntlr.removeListener(_onControllerChanged);
-    _focusNode.removeListener(_onFocusChange);
+    WidgetsBinding.instance.removeObserver(this);
+    _cntlr.removeListener(_didChangeTextEditingValue);
+    _focusNode.removeListener(_handleFocusChanged);
     _scrollController.removeListener(_onScroll);
+    _closeInputConnectionIfNeeded();
+    _stopCursorTimer();
     _scrollController.dispose();
-    _closeInputConnection();
-    _stopCursorBlink();
-    _clearParagraphCache();
+    _clearPainterCache();
     if (widget.cntlr == null) _cntlr.dispose();
     if (widget.focusNode == null) _focusNode.dispose();
     super.dispose();
   }
 
-  void _clearParagraphCache() {
-    for (final p in _paragraphCache.values) {
+  void _clearPainterCache() {
+    for (final p in _linePainterCache.values) {
       p.dispose();
     }
-    _paragraphCache.clear();
+    _linePainterCache.clear();
+    _lastTextForCache = '';
   }
 
-  // ===================== Controller =====================
-
-  void _onControllerChanged() {
-    _clearParagraphCache();
-    widget.onChanged?.call(_cntlr.text);
+  void _didChangeTextEditingValue() {
+    _updateRemoteEditingValueIfNeeded();
     if (mounted) setState(() {});
+    widget.onChanged?.call(_cntlr.text);
   }
 
-  // ===================== 光标 =====================
-
-  int get _cursorLine {
-    final offset = _cntlr.selection.baseOffset;
-    if (offset < 0) return 0;
-    final before = _cntlr.text.substring(0, math.min(offset, _cntlr.text.length));
-    return '\n'.allMatches(before).length;
+  void _handleFocusChanged() {
+    _hasFocus = _focusNode.hasFocus;
+    _openOrCloseInputConnectionIfNeeded();
+    _startOrStopCursorTimerIfNeeded();
   }
 
-  int get _cursorColumn {
-    final offset = _cntlr.selection.baseOffset;
-    if (offset <= 0) return 0;
-    final lastNewline = _cntlr.text.lastIndexOf('\n', offset - 1);
-    return offset - (lastNewline + 1);
+  void _openOrCloseInputConnectionIfNeeded() {
+    if (_hasFocus && _focusNode.consumeKeyboardToken()) {
+      _openInputConnection();
+    } else if (!_hasFocus) {
+      _closeInputConnectionIfNeeded();
+      _cntlr.clearComposing();
+    }
   }
-
-  void _startCursorBlink() {
-    _cursorVisible = true;
-    _cursorTimer?.cancel();
-    _cursorTimer = Timer.periodic(
-      const Duration(milliseconds: 530),
-      (_) {
-        if (mounted) setState(() => _cursorVisible = !_cursorVisible);
-      },
-    );
-  }
-
-  void _stopCursorBlink() {
-    _cursorTimer?.cancel();
-    _cursorTimer = null;
-  }
-
-  void _restartCursorBlink() {
-    if (!mounted) return;
-    _cursorVisible = true;
-    _startCursorBlink();
-  }
-
-  // ===================== 输入 =====================
 
   void _openInputConnection() {
-    if (_inputConnection != null && _inputConnection!.attached) return;
-    _inputConnection = TextInput.attach(
+    if (_hasInputConnection) {
+      _textInputConnection!.updateConfig(
+        const TextInputConfiguration(
+          inputType: TextInputType.multiline,
+          inputAction: TextInputAction.newline,
+          enableSuggestions: false,
+          autocorrect: false,
+        ),
+      );
+      _textInputConnection!.show();
+      return;
+    }
+    final localValue = _value;
+    _textInputConnection = TextInput.attach(
       this,
       const TextInputConfiguration(
         inputType: TextInputType.multiline,
@@ -188,44 +208,94 @@ class _UTextEditorState extends State<UTextEditor>
         autocorrect: false,
       ),
     );
-    _inputConnection!.show();
-    _updateInputConnection();
+    _textInputConnection!
+      ..setStyle(
+        fontFamily: _textStyle.fontFamily,
+        fontSize: _textStyle.fontSize,
+        fontWeight: _textStyle.fontWeight,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.start,
+      )
+      ..setEditingState(localValue)
+      ..show();
   }
 
-  void _closeInputConnection() {
-    _inputConnection?.close();
-    _inputConnection = null;
-  }
-
-  void _updateInputConnection() {
-    if (_inputConnection == null || !_inputConnection!.attached) return;
-    _inputConnection!.setEditingState(_cntlr.value);
-  }
-
-  void _onFocusChange() {
-    if (_focusNode.hasFocus) {
-      _openInputConnection();
-      _startCursorBlink();
-    } else {
-      _closeInputConnection();
-      _stopCursorBlink();
-      if (mounted) setState(() {});
+  void _closeInputConnectionIfNeeded() {
+    if (_hasInputConnection) {
+      _textInputConnection!.close();
+      _textInputConnection = null;
     }
   }
 
-  // ===================== TextInputClient =====================
+  void _updateRemoteEditingValueIfNeeded() {
+    if (!_hasInputConnection) return;
+    final localValue = _value;
+    _textInputConnection?.setEditingState(localValue);
+  }
+
+  void requestKeyboard() {
+    if (_hasFocus) {
+      _openInputConnection();
+    } else {
+      _focusNode.requestFocus();
+    }
+  }
+
+  void _startOrStopCursorTimerIfNeeded() {
+    if (!_hasFocus) {
+      _stopCursorTimer();
+      return;
+    }
+    _startCursorBlink();
+  }
+
+  void _startCursorBlink() {
+    _cursorVisibilityNotifier = true;
+    _stopCursorTimer();
+    _cursorTimer = Timer.periodic(
+      const Duration(milliseconds: 530),
+      (_) {
+        if (!mounted) return;
+        setState(() => _cursorVisibilityNotifier = !_cursorVisibilityNotifier);
+      },
+    );
+  }
+
+  void _stopCursorTimer() {
+    _cursorTimer?.cancel();
+    _cursorTimer = null;
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  double get _scrollOffset =>
+      _scrollController.hasClients ? _scrollController.offset : 0;
+
+  void _ensureCursorVisible() {
+    if (!_scrollController.hasClients) return;
+    final cursorY = _cursorLine * _lineHeightPx;
+    final visibleTop = _scrollOffset;
+    final visibleBottom = visibleTop + _viewportHeight;
+    if (cursorY < visibleTop) {
+      _scrollController.jumpTo(cursorY);
+    } else if (cursorY + _lineHeightPx > visibleBottom) {
+      _scrollController.jumpTo(
+        cursorY + _lineHeightPx - _viewportHeight + _padding.vertical,
+      );
+    }
+  }
 
   @override
-  TextEditingValue? get currentTextEditingValue => _cntlr.value;
+  TextEditingValue? get currentTextEditingValue => _value;
 
   @override
   void updateEditingValue(TextEditingValue value) {
-    final oldValue = _cntlr.value;
-    if (value.text != oldValue.text || value.composing != oldValue.composing) {
-      _cntlr.value = value;
-    } else if (value.selection != oldValue.selection) {
-      _cntlr.selection = value.selection;
-    }
+    final localValue = _value;
+    if (value == localValue) return;
+    _cntlr.value = value;
     _restartCursorBlink();
     _ensureCursorVisible();
   }
@@ -241,7 +311,11 @@ class _UTextEditorState extends State<UTextEditor>
 
   @override
   void connectionClosed() {
-    _inputConnection = null;
+    if (_hasInputConnection) {
+      _textInputConnection?.connectionClosedReceived();
+      _textInputConnection = null;
+      _focusNode.unfocus();
+    }
   }
 
   @override
@@ -257,7 +331,12 @@ class _UTextEditorState extends State<UTextEditor>
   void showToolbar() {}
 
   @override
-  void didChangeInputControl(TextInputControl? old, TextInputControl? now) {}
+  void didChangeInputControl(TextInputControl? old, TextInputControl? now) {
+    if (_hasFocus && _hasInputConnection) {
+      old?.hide();
+      now?.show();
+    }
+  }
 
   @override
   void insertContent(KeyboardInsertedContent content) {}
@@ -268,32 +347,14 @@ class _UTextEditorState extends State<UTextEditor>
   @override
   void performSelector(String selectorName) {}
 
-  // ===================== 滚动 =====================
-
-  void _onScroll() {
-    if (!mounted) return;
-    setState(() {});
+  void _restartCursorBlink() {
+    if (!_hasFocus) return;
+    _cursorVisibilityNotifier = true;
+    _startCursorBlink();
   }
-
-  void _ensureCursorVisible() {
-    if (!_scrollController.hasClients) return;
-    final cursorY = _cursorLine * _lineHeightPx;
-    final visibleTop = _scrollController.offset;
-    final visibleBottom = visibleTop + _viewportHeight;
-
-    if (cursorY < visibleTop) {
-      _scrollController.jumpTo(cursorY);
-    } else if (cursorY + _lineHeightPx > visibleBottom) {
-      _scrollController.jumpTo(
-        cursorY + _lineHeightPx - _viewportHeight + _padding.vertical,
-      );
-    }
-  }
-
-  // ===================== 手势 =====================
 
   void _onTapDown(TapDownDetails details) {
-    _focusNode.requestFocus();
+    requestKeyboard();
     final pos = _offsetToPosition(details.localPosition);
     _setCursor(pos);
   }
@@ -317,49 +378,39 @@ class _UTextEditorState extends State<UTextEditor>
     offset += pos.$2;
     offset = offset.clamp(0, _cntlr.text.length);
     _cntlr.selection = TextSelection.collapsed(offset: offset);
-    _updateInputConnection();
-    _restartCursorBlink();
   }
 
   (int line, int column) _offsetToPosition(Offset offset) {
     double dx = offset.dx - _padding.left;
     if (widget.showLineNumbers) dx -= widget.lineNumberWidth;
-    double dy = offset.dy - _padding.top + _scrollController.offset;
+    double dy = offset.dy - _padding.top + _scrollOffset;
 
     final lines = _cntlr.text.split('\n');
     int line = (dy / _lineHeightPx).floor().clamp(0, lines.length - 1);
 
-    final paragraph = _getParagraph(line);
-    if (paragraph == null) return (line, 0);
+    final painter = _getOrCreateLinePainter(line, lines[line]);
+    if (painter == null) return (line, 0);
 
-    final position = paragraph.getPositionForOffset(Offset(dx, 0));
-    int column = position.offset.clamp(0, lines[line].length);
-    return (line, column);
+    final pos = painter.getPositionForOffset(Offset(dx, _lineHeightPx / 2));
+    return (line, pos.offset.clamp(0, lines[line].length));
   }
 
-  ui.Paragraph? _getParagraph(int lineIndex) {
-    if (_paragraphCache.containsKey(lineIndex)) {
-      return _paragraphCache[lineIndex]!;
+  TextPainter? _getOrCreateLinePainter(int lineIndex, String lineText) {
+    if (_lastTextForCache != _cntlr.text) {
+      _clearPainterCache();
+      _lastTextForCache = _cntlr.text;
     }
-    final lines = _cntlr.text.split('\n');
-    if (lineIndex >= lines.length) return null;
-
-    final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-        ellipsis: '',
-      ),
+    if (_linePainterCache.containsKey(lineIndex)) {
+      return _linePainterCache[lineIndex]!;
+    }
+    final painter = TextPainter(
+      text: TextSpan(text: lineText, style: _textStyle),
+      textDirection: TextDirection.ltr,
     );
-    builder.pushStyle(_uiTextStyle);
-    builder.addText(lines[lineIndex]);
-    final paragraph = builder.build();
-    paragraph.layout(ui.ParagraphConstraints(width: _textWidth));
-    _paragraphCache[lineIndex] = paragraph;
-    return paragraph;
+    painter.layout(maxWidth: _textWidth);
+    _linePainterCache[lineIndex] = painter;
+    return painter;
   }
-
-  // ===================== 键盘 =====================
 
   void _onKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
@@ -367,8 +418,7 @@ class _UTextEditorState extends State<UTextEditor>
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
 
-    final oldSelection = _cntlr.selection;
-    final oldOffset = oldSelection.baseOffset;
+    final oldOffset = _cntlr.selection.baseOffset;
     final text = _cntlr.text;
 
     if (logical == LogicalKeyboardKey.arrowLeft) {
@@ -379,8 +429,6 @@ class _UTextEditorState extends State<UTextEditor>
           offset: math.max(0, oldOffset - 1),
         );
       }
-      _updateInputConnection();
-      _restartCursorBlink();
       _ensureCursorVisible();
       return;
     }
@@ -392,8 +440,6 @@ class _UTextEditorState extends State<UTextEditor>
           offset: math.min(text.length, oldOffset + 1),
         );
       }
-      _updateInputConnection();
-      _restartCursorBlink();
       _ensureCursorVisible();
       return;
     }
@@ -404,11 +450,8 @@ class _UTextEditorState extends State<UTextEditor>
         final prevLineLen = text.split('\n')[line - 1].length;
         int newOffset = oldOffset - col - 1;
         newOffset -= (col > prevLineLen ? col - prevLineLen : 0);
-        newOffset = math.max(0, newOffset);
-        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        _cntlr.selection = TextSelection.collapsed(offset: math.max(0, newOffset));
       }
-      _updateInputConnection();
-      _restartCursorBlink();
       _ensureCursorVisible();
       return;
     }
@@ -419,62 +462,34 @@ class _UTextEditorState extends State<UTextEditor>
         final col = _cursorColumn;
         int newOffset = oldOffset + (lines[line].length - col) + 1;
         newOffset += math.min(col, lines[line + 1].length);
-        newOffset = math.min(text.length, newOffset);
-        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        _cntlr.selection = TextSelection.collapsed(
+          offset: math.min(text.length, newOffset),
+        );
       }
-      _updateInputConnection();
-      _restartCursorBlink();
       _ensureCursorVisible();
       return;
     }
     if (logical == LogicalKeyboardKey.home) {
-      final lineStart = oldOffset - _cursorColumn;
-      _cntlr.selection = TextSelection.collapsed(offset: lineStart);
-      _updateInputConnection();
-      _restartCursorBlink();
+      _cntlr.selection = TextSelection.collapsed(offset: oldOffset - _cursorColumn);
       return;
     }
     if (logical == LogicalKeyboardKey.end) {
       final lines = text.split('\n');
-      final lineEnd = oldOffset - _cursorColumn + lines[_cursorLine].length;
-      _cntlr.selection = TextSelection.collapsed(offset: lineEnd);
-      _updateInputConnection();
-      _restartCursorBlink();
+      _cntlr.selection = TextSelection.collapsed(
+        offset: oldOffset - _cursorColumn + lines[_cursorLine].length,
+      );
       return;
     }
     if (logical == LogicalKeyboardKey.backspace || logical == LogicalKeyboardKey.delete) {
-      final isForward = logical == LogicalKeyboardKey.delete;
-      _handleDelete(oldSelection, isForward);
-      _updateInputConnection();
-      _restartCursorBlink();
+      _handleDelete(logical == LogicalKeyboardKey.delete);
       return;
     }
     if (logical == LogicalKeyboardKey.enter || logical == LogicalKeyboardKey.numpadEnter) {
-      final value = _cntlr.value;
-      final offset = value.selection.baseOffset;
-      final text = value.text;
-      final result = TextEditingValue(
-        text: '${text.substring(0, offset)}\n${text.substring(offset)}',
-        selection: TextSelection.collapsed(offset: offset + 1),
-      );
-      _cntlr.value = result;
-      _updateInputConnection();
-      _restartCursorBlink();
-      _ensureCursorVisible();
+      _insertNewline();
       return;
     }
     if (logical == LogicalKeyboardKey.tab) {
-      final value = _cntlr.value;
-      final offset = value.selection.baseOffset;
-      final text = value.text;
-      final result = TextEditingValue(
-        text: '${text.substring(0, offset)}  ${text.substring(offset)}',
-        selection: TextSelection.collapsed(offset: offset + 2),
-      );
-      _cntlr.value = result;
-      _updateInputConnection();
-      _restartCursorBlink();
-      _ensureCursorVisible();
+      _insertText('  ');
       return;
     }
     if (isCtrl && logical == LogicalKeyboardKey.keyC) {
@@ -489,41 +504,44 @@ class _UTextEditorState extends State<UTextEditor>
       _copy();
       return;
     }
-
-    final character = event.character;
-    if (character != null && character.isNotEmpty && !isCtrl) {
-      final value = _cntlr.value;
-      final offset = value.selection.baseOffset;
-      final text = value.text;
-      final result = TextEditingValue(
-        text: '${text.substring(0, offset)}$character${text.substring(offset)}',
-        selection: TextSelection.collapsed(offset: offset + character.length),
-      );
-      _cntlr.value = result;
-      _updateInputConnection();
-      _restartCursorBlink();
-      _ensureCursorVisible();
-    }
   }
 
-  void _handleDelete(TextSelection selection, bool forward) {
+  void _handleDelete(bool forward) {
     final text = _cntlr.text;
-    final offset = selection.baseOffset;
+    final offset = _cntlr.selection.baseOffset;
     if (forward) {
       if (offset >= text.length) return;
-      final result = TextEditingValue(
+      _cntlr.value = TextEditingValue(
         text: text.substring(0, offset) + text.substring(offset + 1),
         selection: TextSelection.collapsed(offset: offset),
       );
-      _cntlr.value = result;
     } else {
       if (offset <= 0) return;
-      final result = TextEditingValue(
+      _cntlr.value = TextEditingValue(
         text: text.substring(0, offset - 1) + text.substring(offset),
         selection: TextSelection.collapsed(offset: offset - 1),
       );
-      _cntlr.value = result;
     }
+  }
+
+  void _insertNewline() {
+    final text = _cntlr.text;
+    final offset = _cntlr.selection.baseOffset;
+    _cntlr.value = TextEditingValue(
+      text: '${text.substring(0, offset)}\n${text.substring(offset)}',
+      selection: TextSelection.collapsed(offset: offset + 1),
+    );
+    _ensureCursorVisible();
+  }
+
+  void _insertText(String insertText) {
+    final text = _cntlr.text;
+    final offset = _cntlr.selection.baseOffset;
+    _cntlr.value = TextEditingValue(
+      text: '${text.substring(0, offset)}$insertText${text.substring(offset)}',
+      selection: TextSelection.collapsed(offset: offset + insertText.length),
+    );
+    _ensureCursorVisible();
   }
 
   void _moveCursorWordLeft(int offset) {
@@ -536,8 +554,6 @@ class _UTextEditorState extends State<UTextEditor>
       pos--;
     }
     _cntlr.selection = TextSelection.collapsed(offset: pos);
-    _updateInputConnection();
-    _restartCursorBlink();
   }
 
   void _moveCursorWordRight(int offset) {
@@ -550,8 +566,6 @@ class _UTextEditorState extends State<UTextEditor>
       pos++;
     }
     _cntlr.selection = TextSelection.collapsed(offset: pos);
-    _updateInputConnection();
-    _restartCursorBlink();
   }
 
   void _copy() async {
@@ -561,24 +575,16 @@ class _UTextEditorState extends State<UTextEditor>
   void _paste() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data?.text == null) return;
-    final value = _cntlr.value;
-    final offset = value.selection.baseOffset;
-    final text = value.text;
-    final pasteText = data!.text!;
-    final result = TextEditingValue(
-      text: '${text.substring(0, offset)}$pasteText${text.substring(offset)}',
-      selection: TextSelection.collapsed(offset: offset + pasteText.length),
-    );
-    _cntlr.value = result;
-    _updateInputConnection();
-    _restartCursorBlink();
+    _insertText(data!.text!);
   }
-
-  // ===================== Build =====================
 
   @override
   Widget build(BuildContext context) {
     final theme = UTheme.of(context);
+    if (_lastTextForCache != _cntlr.text) {
+      _clearPainterCache();
+      _lastTextForCache = _cntlr.text;
+    }
     return Focus(
       focusNode: _focusNode,
       onKeyEvent: (_, event) {
@@ -609,11 +615,11 @@ class _UTextEditorState extends State<UTextEditor>
                         ),
                         painter: _EditorPainter(
                           controller: _cntlr,
-                          cursorVisible: _cursorVisible && _focusNode.hasFocus,
-                          textStyle: _uiTextStyle,
+                          cursorVisible: _cursorVisibilityNotifier && _hasFocus,
+                          textStyle: _textStyle,
                           lineHeight: _lineHeightPx,
                           padding: _padding,
-                          scrollOffset:_scrollController.hasClients? _scrollController.offset: 0,
+                          scrollOffset: _scrollOffset,
                           viewportHeight: _viewportHeight,
                           textColor: _textColor,
                           showLineNumbers: widget.showLineNumbers,
@@ -621,9 +627,8 @@ class _UTextEditorState extends State<UTextEditor>
                           lineNumberStyle: _lineNumberStyle,
                           lineNumberCurrentColor: _lineNumberCurrentColor,
                           lineNumberColor: _lineNumberColor,
-                          surfaceColor: _surfaceColor,
-                          paragraphCache: _paragraphCache,
                           textWidth: _textWidth,
+                          getOrCreateLinePainter: _getOrCreateLinePainter,
                         ),
                       ),
                     ),
@@ -662,12 +667,10 @@ class _UTextEditorState extends State<UTextEditor>
   }
 }
 
-// ===================== Editor Painter =====================
-
 class _EditorPainter extends CustomPainter {
   final TextEditingController controller;
   final bool cursorVisible;
-  final ui.TextStyle textStyle;
+  final TextStyle textStyle;
   final double lineHeight;
   final EdgeInsets padding;
   final double scrollOffset;
@@ -678,9 +681,8 @@ class _EditorPainter extends CustomPainter {
   final TextStyle lineNumberStyle;
   final Color lineNumberCurrentColor;
   final Color lineNumberColor;
-  final Color surfaceColor;
-  final Map<int, ui.Paragraph> paragraphCache;
   final double textWidth;
+  final TextPainter? Function(int lineIndex, String lineText) getOrCreateLinePainter;
 
   _EditorPainter({
     required this.controller,
@@ -696,20 +698,18 @@ class _EditorPainter extends CustomPainter {
     required this.lineNumberStyle,
     required this.lineNumberCurrentColor,
     required this.lineNumberColor,
-    required this.surfaceColor,
-    required this.paragraphCache,
     required this.textWidth,
+    required this.getOrCreateLinePainter,
   });
 
   int get _totalLines {
-    final text = controller.text;
-    if (text.isEmpty) return 1;
-    return '\n'.allMatches(text).length + 1;
+    if (controller.text.isEmpty) return 1;
+    return '\n'.allMatches(controller.text).length + 1;
   }
 
   int get _cursorLine {
     final offset = controller.selection.baseOffset;
-    if (offset <= 0) return 0;
+    if (offset < 0) return 0;
     final before = controller.text.substring(0, math.min(offset, controller.text.length));
     return '\n'.allMatches(before).length;
   }
@@ -723,9 +723,7 @@ class _EditorPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final lines = controller.text.isEmpty
-        ? <String>['']
-        : controller.text.split('\n');
+    final lines = controller.text.isEmpty ? <String>[''] : controller.text.split('\n');
     final startLine = math.max(0, (scrollOffset / lineHeight).floor() - 2);
     final endLine = math.min(
       lines.length,
@@ -734,53 +732,60 @@ class _EditorPainter extends CustomPainter {
 
     final textStartX = padding.left + (showLineNumbers ? lineNumberWidth : 0);
 
-    // 画行号
     if (showLineNumbers) {
-      _paintLineNumbers(canvas, size, startLine, endLine);
+      _paintLineNumbers(canvas, size, lines, startLine, endLine);
     }
 
-    // 画文本
     for (int i = startLine; i < endLine; i++) {
       final y = padding.top + i * lineHeight;
+      if (y + lineHeight < scrollOffset - lineHeight ||
+          y > scrollOffset + viewportHeight + lineHeight) {
+        continue;
+      }
       canvas.save();
       canvas.clipRect(Rect.fromLTWH(textStartX, y, textWidth, lineHeight + 1));
-
-      final paragraph = _getParagraph(i, lines);
-      if (paragraph != null) {
-        canvas.drawParagraph(paragraph, Offset(textStartX, y));
+      final painter = getOrCreateLinePainter(i, lines[i]);
+      if (painter != null) {
+        painter.paint(canvas, Offset(textStartX, y));
       }
       canvas.restore();
     }
 
-    // 画光标
     if (cursorVisible) {
-      final cursorY = padding.top + _cursorLine * lineHeight;
-      double cursorX = textStartX;
-
-      if (_cursorColumn > 0) {
-        final cursorLine = _cursorLine;
-        if (cursorLine < lines.length) {
-          final lineText = lines[cursorLine].substring(0, _cursorColumn);
-          final p = _buildParagraph(lineText);
-          cursorX += p.width;
-          p.dispose();
-        }
-      }
-
-      final cursorPaint = Paint()
-        ..color = textColor
-        ..strokeWidth = 1.5;
-      canvas.drawLine(
-        Offset(cursorX, cursorY + 1),
-        Offset(cursorX, cursorY + lineHeight - 1),
-        cursorPaint,
-      );
+      _paintCursor(canvas, lines, textStartX);
     }
+  }
+
+  void _paintCursor(Canvas canvas, List<String> lines, double textStartX) {
+    final cl = _cursorLine;
+    if (cl >= lines.length) return;
+
+    final painter = getOrCreateLinePainter(cl, lines[cl]);
+    if (painter == null) return;
+
+    final caretPrototype = Rect.fromLTWH(0, 0, 1.5, lineHeight);
+    final caretOffset = painter.getOffsetForCaret(
+      TextPosition(offset: _cursorColumn),
+      caretPrototype,
+    );
+
+    final cursorX = textStartX + caretOffset.dx;
+    final cursorY = padding.top + cl * lineHeight;
+
+    final paint = Paint()
+      ..color = textColor
+      ..strokeWidth = 1.5;
+    canvas.drawLine(
+      Offset(cursorX, cursorY + 1),
+      Offset(cursorX, cursorY + lineHeight - 1),
+      paint,
+    );
   }
 
   void _paintLineNumbers(
     Canvas canvas,
     Size size,
+    List<String> lines,
     int startLine,
     int endLine,
   ) {
@@ -798,10 +803,9 @@ class _EditorPainter extends CustomPainter {
         canvas.drawRect(Rect.fromLTWH(0, y, lineNumberWidth, lineHeight), bgPaint);
       }
 
-      final numText = '${i + 1}';
       final numPainter = TextPainter(
         text: TextSpan(
-          text: numText,
+          text: '${i + 1}',
           style: lineNumberStyle.copyWith(
             color: isCurrent ? lineNumberCurrentColor : lineNumberColor,
           ),
@@ -809,38 +813,11 @@ class _EditorPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
         textAlign: TextAlign.right,
       );
-      numPainter.layout(
-        minWidth: lineNumberWidth - 8,
-        maxWidth: lineNumberWidth - 8,
-      );
+      numPainter.layout(minWidth: lineNumberWidth - 8, maxWidth: lineNumberWidth - 8);
       numPainter.paint(canvas, Offset(0, y));
     }
   }
 
-  ui.Paragraph? _getParagraph(int lineIndex, List<String> lines) {
-    if (paragraphCache.containsKey(lineIndex)) return paragraphCache[lineIndex];
-    if (lineIndex >= lines.length) return null;
-    return _buildParagraph(lines[lineIndex], cacheIndex: lineIndex);
-  }
-
-  ui.Paragraph _buildParagraph(String text, {int? cacheIndex}) {
-    final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-        ellipsis: '',
-      ),
-    );
-    builder.pushStyle(textStyle);
-    builder.addText(text);
-    final paragraph = builder.build();
-    paragraph.layout(ui.ParagraphConstraints(width: textWidth));
-    if (cacheIndex != null) paragraphCache[cacheIndex] = paragraph;
-    return paragraph;
-  }
-
   @override
-  bool shouldRepaint(covariant _EditorPainter old) {
-    return true;
-  }
+  bool shouldRepaint(covariant _EditorPainter old) => true;
 }
