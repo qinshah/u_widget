@@ -663,28 +663,41 @@ class _UTextEditorState extends State<UTextEditor>
     final logical = event.logicalKey;
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
+    final isShift = HardwareKeyboard.instance.isShiftPressed;
 
     final oldOffset = _cntlr.selection.baseOffset;
     final text = _cntlr.text;
 
     if (logical == LogicalKeyboardKey.arrowLeft) {
+      int newOffset;
       if (isCtrl) {
-        _moveCursorWordLeft(oldOffset);
+        newOffset = _findWordLeft(oldOffset);
       } else {
-        _cntlr.selection = TextSelection.collapsed(
-          offset: math.max(0, oldOffset - 1),
+        newOffset = math.max(0, oldOffset - 1);
+      }
+      if (isShift) {
+        _cntlr.selection = _cntlr.selection.extendTo(
+          TextPosition(offset: newOffset),
         );
+      } else {
+        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.arrowRight) {
+      int newOffset;
       if (isCtrl) {
-        _moveCursorWordRight(oldOffset);
+        newOffset = _findWordRight(oldOffset);
       } else {
-        _cntlr.selection = TextSelection.collapsed(
-          offset: math.min(text.length, oldOffset + 1),
+        newOffset = math.min(text.length, oldOffset + 1);
+      }
+      if (isShift) {
+        _cntlr.selection = _cntlr.selection.extendTo(
+          TextPosition(offset: newOffset),
         );
+      } else {
+        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
@@ -695,7 +708,13 @@ class _UTextEditorState extends State<UTextEditor>
         final col = _cursorColumn;
         final newOffset = _lineStarts[line - 1] +
             math.min<int>(col, _getLineLength(line - 1));
-        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        if (isShift) {
+          _cntlr.selection = _cntlr.selection.extendTo(
+            TextPosition(offset: newOffset),
+          );
+        } else {
+          _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        }
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
@@ -706,7 +725,13 @@ class _UTextEditorState extends State<UTextEditor>
         final col = _cursorColumn;
         final newOffset = _lineStarts[line + 1] +
             math.min<int>(col, _getLineLength(line + 1));
-        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        if (isShift) {
+          _cntlr.selection = _cntlr.selection.extendTo(
+            TextPosition(offset: newOffset),
+          );
+        } else {
+          _cntlr.selection = TextSelection.collapsed(offset: newOffset);
+        }
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
@@ -737,6 +762,10 @@ class _UTextEditorState extends State<UTextEditor>
     }
     if (logical == LogicalKeyboardKey.tab) {
       _insertText('  ');
+      return KeyEventResult.handled;
+    }
+    if (isCtrl && logical == LogicalKeyboardKey.keyA) {
+      selectAll(SelectionChangedCause.keyboard);
       return KeyEventResult.handled;
     }
     if (isCtrl && logical == LogicalKeyboardKey.keyC) {
@@ -809,7 +838,8 @@ class _UTextEditorState extends State<UTextEditor>
     _ensureCursorVisible();
   }
 
-  void _moveCursorWordLeft(int offset) {
+  int _findWordLeft(int offset) {
+    if (offset <= 0) return 0;
     final text = _cntlr.text;
     int pos = offset;
     while (pos > 0 && text[pos - 1] == ' ') {
@@ -818,11 +848,12 @@ class _UTextEditorState extends State<UTextEditor>
     while (pos > 0 && text[pos - 1] != ' ') {
       pos--;
     }
-    _cntlr.selection = TextSelection.collapsed(offset: pos);
+    return pos;
   }
 
-  void _moveCursorWordRight(int offset) {
+  int _findWordRight(int offset) {
     final text = _cntlr.text;
+    if (offset >= text.length) return text.length;
     int pos = offset;
     while (pos < text.length && text[pos] != ' ') {
       pos++;
@@ -830,7 +861,7 @@ class _UTextEditorState extends State<UTextEditor>
     while (pos < text.length && text[pos] == ' ') {
       pos++;
     }
-    _cntlr.selection = TextSelection.collapsed(offset: pos);
+    return pos;
   }
 
   void _copy() async {
@@ -857,27 +888,164 @@ class _UTextEditorState extends State<UTextEditor>
   void _onTapDown(TapDownDetails details) {
     requestKeyboard();
     final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
+    _beginBatchEdit();
+    _cntlr.selection = TextSelection.collapsed(
+      offset: (_lineStarts[pos.$1] + pos.$2).clamp(0, _cntlr.text.length),
+    );
+    _endBatchEdit();
+    _restartCursorBlink();
+    _ensureCursorVisible();
+  }
+
+  void _onDoubleTapDown(TapDownDetails details) {
+    final pos = _offsetToPosition(details.localPosition);
+    final offset = (_lineStarts[pos.$1] + pos.$2).clamp(0, _cntlr.text.length);
+    _selectWordAtOffset(offset);
+    _restartCursorBlink();
+    _ensureCursorVisible();
+  }
+
+  void _onSecondaryTapDown(TapDownDetails details) {
+    final pos = _offsetToPosition(details.localPosition);
+    final offset = (_lineStarts[pos.$1] + pos.$2).clamp(0, _cntlr.text.length);
+    if (_cntlr.selection.isCollapsed) {
+      _beginBatchEdit();
+      _cntlr.selection = TextSelection.collapsed(offset: offset);
+      _endBatchEdit();
+    }
+    _showContextMenu();
   }
 
   void _onPanStart(DragStartDetails details) {
     final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
+    final offset = (_lineStarts[pos.$1] + pos.$2).clamp(0, _cntlr.text.length);
+    _beginBatchEdit();
+    _cntlr.selection = TextSelection(
+      baseOffset: offset,
+      extentOffset: offset,
+    );
+    _endBatchEdit();
+    _restartCursorBlink();
+    _ensureCursorVisible();
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     final pos = _offsetToPosition(details.localPosition);
-    _setCursor(pos);
-  }
-
-  void _setCursor((int line, int column) pos) {
-    int offset = _lineStarts[pos.$1] + pos.$2;
-    offset = offset.clamp(0, _cntlr.text.length);
+    final offset = (_lineStarts[pos.$1] + pos.$2).clamp(0, _cntlr.text.length);
+    final base = _cntlr.selection.baseOffset;
     _beginBatchEdit();
-    _cntlr.selection = TextSelection.collapsed(offset: offset);
+    _cntlr.selection = TextSelection(
+      baseOffset: base,
+      extentOffset: offset,
+    );
     _endBatchEdit();
     _restartCursorBlink();
     _ensureCursorVisible();
+  }
+
+  void _selectWordAtOffset(int offset) {
+    final text = _cntlr.text;
+    if (text.isEmpty) return;
+    int start = offset.clamp(0, text.length - 1);
+    while (start > 0 && _isWordChar(text[start - 1])) {
+      start--;
+    }
+    int end = offset.clamp(0, text.length);
+    while (end < text.length && _isWordChar(text[end])) {
+      end++;
+    }
+    if (start == end) return;
+    _beginBatchEdit();
+    _cntlr.selection = TextSelection(baseOffset: start, extentOffset: end);
+    _endBatchEdit();
+  }
+
+  bool _isWordChar(String ch) {
+    final code = ch.codeUnitAt(0);
+    return (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122) ||
+        (code >= 48 && code <= 57) ||
+        code == 95;
+  }
+
+  void _showContextMenu() {
+    final sel = _cntlr.selection;
+    final hasSelection = sel.isValid && !sel.isCollapsed;
+
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (_) {
+                  entry.remove();
+                },
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+            Positioned(
+              left: 8,
+              top: math.max(0, _viewportHeight - 160),
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasSelection) ...[
+                        _buildMenuButton('剪切', Icons.content_cut, () {
+                          entry.remove();
+                          cutSelection(SelectionChangedCause.toolbar);
+                        }),
+                        _buildMenuButton('复制', Icons.content_copy, () {
+                          entry.remove();
+                          copySelection(SelectionChangedCause.toolbar);
+                        }),
+                      ],
+                      _buildMenuButton('粘贴', Icons.content_paste, () {
+                        entry.remove();
+                        pasteText(SelectionChangedCause.toolbar);
+                      }),
+                      if (hasSelection) const Divider(height: 1),
+                      _buildMenuButton('全选', Icons.select_all, () {
+                        entry.remove();
+                        selectAll(SelectionChangedCause.toolbar);
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    overlay.insert(entry);
+  }
+
+  Widget _buildMenuButton(String label, IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 8),
+            Text(label),
+          ],
+        ),
+      ),
+    );
   }
 
   (int line, int column) _offsetToPosition(Offset offset) {
@@ -964,6 +1132,8 @@ class _UTextEditorState extends State<UTextEditor>
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
           onTapDown: _onTapDown,
+          onDoubleTapDown: _onDoubleTapDown,
+          onSecondaryTapDown: _onSecondaryTapDown,
           onPanStart: _onPanStart,
           onPanUpdate: _onPanUpdate,
           child: Column(
@@ -1150,6 +1320,8 @@ class _EditorPainter extends CustomPainter {
       _paintLineNumbers(canvas, startLine, endLine);
     }
 
+    _paintSelection(canvas, textStartX);
+
     for (int i = startLine; i < endLine; i++) {
       final y = padding.top + i * lineHeight;
       canvas.save();
@@ -1166,6 +1338,77 @@ class _EditorPainter extends CustomPainter {
 
     if (_cursorVisible) {
       _paintCursor(canvas, textStartX);
+    }
+  }
+
+  void _paintSelection(Canvas canvas, double textStartX) {
+    final selection = controller.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+
+    final text = controller.text;
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(0, text.length);
+    if (start == end) return;
+
+    final highlightPaint = Paint()
+      ..color = const Color(0x660000FF);
+
+    int lineIdx = 0;
+    int lo = 0, hi = lineStarts.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) ~/ 2;
+      if (lineStarts[mid] <= start) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final startLine = lo;
+
+    lo = 0;
+    hi = lineStarts.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) ~/ 2;
+      if (lineStarts[mid] <= end) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final endLine = lo;
+
+    for (lineIdx = startLine; lineIdx <= endLine; lineIdx++) {
+      final lineText = _lineText(lineIdx);
+      final painter = getOrCreateLinePainter(lineIdx, lineText);
+      if (painter == null) continue;
+
+      int selStart = 0;
+      int selEnd = lineText.length;
+
+      if (lineIdx == startLine) {
+        selStart = start - lineStarts[lineIdx];
+      }
+      if (lineIdx == endLine) {
+        selEnd = end - lineStarts[lineIdx];
+      }
+      selStart = selStart.clamp(0, lineText.length);
+      selEnd = selEnd.clamp(0, lineText.length);
+      if (selStart >= selEnd) continue;
+
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: selStart, extentOffset: selEnd),
+      );
+      for (final box in boxes) {
+          canvas.drawRect(
+            Rect.fromLTRB(
+              textStartX + box.left,
+              padding.top + lineIdx * lineHeight + box.top,
+              textStartX + box.right,
+              padding.top + lineIdx * lineHeight + box.bottom,
+            ),
+            highlightPaint,
+          );
+        }
     }
   }
 
