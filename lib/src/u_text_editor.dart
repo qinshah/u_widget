@@ -41,10 +41,11 @@ class _UTextEditorState extends State<UTextEditor>
   late final TextEditingController _cntlr;
   late final FocusNode _focusNode;
   final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<bool> _cursorBlinkNotifier = ValueNotifier<bool>(true);
+  late final Listenable _repaintNotifier;
 
   TextInputConnection? _textInputConnection;
   Timer? _cursorTimer;
-  bool _cursorVisibilityNotifier = true;
   bool _hasFocus = false;
 
   int _batchEditDepth = 0;
@@ -53,6 +54,7 @@ class _UTextEditorState extends State<UTextEditor>
   double _viewportHeight = 0;
   double _viewportWidth = 0;
   double _lineHeightPx = 0;
+  double _lastTextWidth = -1;
 
   late TextStyle _textStyle;
   late TextStyle _lineNumberStyle;
@@ -60,8 +62,12 @@ class _UTextEditorState extends State<UTextEditor>
   Color _lineNumberColor = Colors.grey;
   Color _lineNumberCurrentColor = Colors.blue;
 
+  List<int> _lineStarts = [0];
+  String _lastRebuiltText = '';
+  int _textGeneration = 0;
+
   final Map<int, TextPainter> _linePainterCache = {};
-  String _lastTextForCache = '';
+  int _lastTextGeneration = -1;
 
   EdgeInsets get _padding =>
       widget.padding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
@@ -72,25 +78,56 @@ class _UTextEditorState extends State<UTextEditor>
     return math.max(w, 1);
   }
 
-  double get _contentHeight => _totalLines * _lineHeightPx;
+  double get _contentHeight => _lineStarts.length * _lineHeightPx;
 
-  int get _totalLines {
-    if (_cntlr.text.isEmpty) return 1;
-    return '\n'.allMatches(_cntlr.text).length + 1;
-  }
+  double get _scrollOffset =>
+      _scrollController.hasClients ? _scrollController.offset : 0;
 
   int get _cursorLine {
     final offset = _cntlr.selection.baseOffset;
     if (offset < 0) return 0;
-    final before = _cntlr.text.substring(0, math.min(offset, _cntlr.text.length));
-    return '\n'.allMatches(before).length;
+    int lo = 0, hi = _lineStarts.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) ~/ 2;
+      if (_lineStarts[mid] <= offset) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
   }
 
   int get _cursorColumn {
     final offset = _cntlr.selection.baseOffset;
     if (offset <= 0) return 0;
-    final lastNewline = _cntlr.text.lastIndexOf('\n', offset - 1);
-    return offset - (lastNewline + 1);
+    return offset - _lineStarts[_cursorLine];
+  }
+
+  String _getLineText(int i) {
+    final text = _cntlr.text;
+    final start = _lineStarts[i];
+    final end = i < _lineStarts.length - 1 ? _lineStarts[i + 1] - 1 : text.length;
+    if (start > end) return '';
+    return text.substring(start, end);
+  }
+
+  int _getLineLength(int i) {
+    if (i < _lineStarts.length - 1) {
+      return _lineStarts[i + 1] - 1 - _lineStarts[i];
+    }
+    return _cntlr.text.length - _lineStarts[i];
+  }
+
+  static List<int> _buildLineStarts(String text) {
+    if (text.isEmpty) return [0];
+    final starts = <int>[0];
+    for (int i = 0; i < text.length; i++) {
+      if (text[i] == '\n') {
+        starts.add(i + 1);
+      }
+    }
+    return starts;
   }
 
   bool get _hasInputConnection =>
@@ -103,10 +140,14 @@ class _UTextEditorState extends State<UTextEditor>
     super.initState();
     _cntlr = widget.cntlr ?? TextEditingController(text: widget.initialText);
     _focusNode = widget.focusNode ?? FocusNode();
+    _repaintNotifier = Listenable.merge([_scrollController, _cursorBlinkNotifier]);
     _cntlr.addListener(_didChangeTextEditingValue);
     _focusNode.addListener(_handleFocusChanged);
-    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addObserver(this);
+    if (widget.initialText.isNotEmpty) {
+      _lineStarts = _buildLineStarts(widget.initialText);
+      _lastRebuiltText = widget.initialText;
+    }
   }
 
   @override
@@ -136,9 +177,9 @@ class _UTextEditorState extends State<UTextEditor>
     WidgetsBinding.instance.removeObserver(this);
     _cntlr.removeListener(_didChangeTextEditingValue);
     _focusNode.removeListener(_handleFocusChanged);
-    _scrollController.removeListener(_onScroll);
     _closeInputConnectionIfNeeded();
     _stopCursorTimer();
+    _cursorBlinkNotifier.dispose();
     _scrollController.dispose();
     _clearPainterCache();
     if (widget.cntlr == null) _cntlr.dispose();
@@ -151,7 +192,7 @@ class _UTextEditorState extends State<UTextEditor>
       p.dispose();
     }
     _linePainterCache.clear();
-    _lastTextForCache = '';
+    _lastTextGeneration = -1;
   }
 
   void _beginBatchEdit() {
@@ -165,12 +206,18 @@ class _UTextEditorState extends State<UTextEditor>
   }
 
   void _didChangeTextEditingValue() {
+    if (_lastRebuiltText != _cntlr.text) {
+      _lineStarts = _buildLineStarts(_cntlr.text);
+      _lastRebuiltText = _cntlr.text;
+      _textGeneration++;
+    }
     if (mounted) setState(() {});
     widget.onChanged?.call(_cntlr.text);
   }
 
   void _handleFocusChanged() {
-    _hasFocus = _focusNode.hasFocus;
+    if (!mounted) return;
+    setState(() => _hasFocus = _focusNode.hasFocus);
     _openOrCloseInputConnectionIfNeeded();
     _startOrStopCursorTimerIfNeeded();
   }
@@ -246,6 +293,7 @@ class _UTextEditorState extends State<UTextEditor>
 
   void _startOrStopCursorTimerIfNeeded() {
     if (!_hasFocus) {
+      _cursorBlinkNotifier.value = false;
       _stopCursorTimer();
       return;
     }
@@ -253,13 +301,13 @@ class _UTextEditorState extends State<UTextEditor>
   }
 
   void _startCursorBlink() {
-    _cursorVisibilityNotifier = true;
+    _cursorBlinkNotifier.value = true;
     _stopCursorTimer();
     _cursorTimer = Timer.periodic(
       const Duration(milliseconds: 530),
       (_) {
         if (!mounted) return;
-        setState(() => _cursorVisibilityNotifier = !_cursorVisibilityNotifier);
+        _cursorBlinkNotifier.value = !_cursorBlinkNotifier.value;
       },
     );
   }
@@ -268,14 +316,6 @@ class _UTextEditorState extends State<UTextEditor>
     _cursorTimer?.cancel();
     _cursorTimer = null;
   }
-
-  void _onScroll() {
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  double get _scrollOffset =>
-      _scrollController.hasClients ? _scrollController.offset : 0;
 
   void _ensureCursorVisible() {
     if (!_scrollController.hasClients) return;
@@ -391,7 +431,10 @@ class _UTextEditorState extends State<UTextEditor>
   @override
   void selectAll(SelectionChangedCause cause) {
     if (_cntlr.text.isEmpty) return;
-    _cntlr.selection = TextSelection(baseOffset: 0, extentOffset: _cntlr.text.length);
+    _cntlr.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _cntlr.text.length,
+    );
   }
 
   @override
@@ -509,47 +552,45 @@ class _UTextEditorState extends State<UTextEditor>
 
     if (intent.collapseSelection) {
       userUpdateTextEditingValue(
-        _cntlr.value.copyWith(selection: TextSelection.collapsed(offset: newOffset)),
+        _cntlr.value.copyWith(
+          selection: TextSelection.collapsed(offset: newOffset),
+        ),
         SelectionChangedCause.keyboard,
       );
     } else {
       userUpdateTextEditingValue(
         _cntlr.value.copyWith(
-          selection: TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+          selection: TextSelection(
+            baseOffset: selection.baseOffset,
+            extentOffset: newOffset,
+          ),
         ),
         SelectionChangedCause.keyboard,
       );
     }
   }
 
-  void _handleExtendSelectionVertically(ExtendSelectionVerticallyToAdjacentLineIntent intent) {
+  void _handleExtendSelectionVertically(
+    ExtendSelectionVerticallyToAdjacentLineIntent intent,
+  ) {
     final text = _cntlr.text;
-    final lines = text.split('\n');
     final cl = _cursorLine;
     final cc = _cursorColumn;
     int newOffset;
 
     if (intent.forward) {
-      if (cl >= lines.length - 1) {
+      if (cl >= _lineStarts.length - 1) {
         newOffset = text.length;
       } else {
-        final newCol = cc.clamp(0, lines[cl + 1].length);
-        newOffset = 0;
-        for (int i = 0; i <= cl; i++) {
-          newOffset += lines[i].length + 1;
-        }
-        newOffset += newCol;
+        final newCol = cc.clamp(0, _getLineLength(cl + 1));
+        newOffset = _lineStarts[cl + 1] + newCol;
       }
     } else {
       if (cl <= 0) {
         newOffset = 0;
       } else {
-        final newCol = cc.clamp(0, lines[cl - 1].length);
-        newOffset = 0;
-        for (int i = 0; i < cl - 1; i++) {
-          newOffset += lines[i].length + 1;
-        }
-        newOffset += newCol;
+        final newCol = cc.clamp(0, _getLineLength(cl - 1));
+        newOffset = _lineStarts[cl - 1] + newCol;
       }
     }
 
@@ -559,13 +600,18 @@ class _UTextEditorState extends State<UTextEditor>
 
     if (intent.collapseSelection) {
       userUpdateTextEditingValue(
-        _cntlr.value.copyWith(selection: TextSelection.collapsed(offset: newOffset)),
+        _cntlr.value.copyWith(
+          selection: TextSelection.collapsed(offset: newOffset),
+        ),
         SelectionChangedCause.keyboard,
       );
     } else {
       userUpdateTextEditingValue(
         _cntlr.value.copyWith(
-          selection: TextSelection(baseOffset: currentOffset, extentOffset: newOffset),
+          selection: TextSelection(
+            baseOffset: currentOffset,
+            extentOffset: newOffset,
+          ),
         ),
         SelectionChangedCause.keyboard,
       );
@@ -586,7 +632,8 @@ class _UTextEditorState extends State<UTextEditor>
     final text = data!.text!;
     final sel = _cntlr.selection;
     final fullText = _cntlr.text;
-    final newText = '${fullText.substring(0, sel.start)}$text${fullText.substring(sel.end)}';
+    final newText =
+        '${fullText.substring(0, sel.start)}$text${fullText.substring(sel.end)}';
     final newValue = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: sel.start + text.length),
@@ -598,7 +645,10 @@ class _UTextEditorState extends State<UTextEditor>
     if (_cntlr.text.isEmpty) return;
     userUpdateTextEditingValue(
       _cntlr.value.copyWith(
-        selection: TextSelection(baseOffset: 0, extentOffset: _cntlr.text.length),
+        selection: TextSelection(
+          baseOffset: 0,
+          extentOffset: _cntlr.text.length,
+        ),
       ),
       intent.cause,
     );
@@ -607,7 +657,9 @@ class _UTextEditorState extends State<UTextEditor>
   // ===================== 键盘事件处理 =====================
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
     final logical = event.logicalKey;
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
@@ -641,46 +693,45 @@ class _UTextEditorState extends State<UTextEditor>
       final line = _cursorLine;
       if (line > 0) {
         final col = _cursorColumn;
-        final prevLineLen = text.split('\n')[line - 1].length;
-        int newOffset = oldOffset - col - 1;
-        newOffset -= (col > prevLineLen ? col - prevLineLen : 0);
-        _cntlr.selection = TextSelection.collapsed(offset: math.max(0, newOffset));
+        final newOffset = _lineStarts[line - 1] +
+            math.min<int>(col, _getLineLength(line - 1));
+        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.arrowDown) {
       final line = _cursorLine;
-      final lines = text.split('\n');
-      if (line < lines.length - 1) {
+      if (line < _lineStarts.length - 1) {
         final col = _cursorColumn;
-        int newOffset = oldOffset + (lines[line].length - col) + 1;
-        newOffset += math.min(col, lines[line + 1].length);
-        _cntlr.selection = TextSelection.collapsed(
-          offset: math.min(text.length, newOffset),
-        );
+        final newOffset = _lineStarts[line + 1] +
+            math.min<int>(col, _getLineLength(line + 1));
+        _cntlr.selection = TextSelection.collapsed(offset: newOffset);
       }
       _ensureCursorVisible();
       return KeyEventResult.handled;
     }
     if (logical == LogicalKeyboardKey.home) {
-      _cntlr.selection = TextSelection.collapsed(offset: oldOffset - _cursorColumn);
-      _ensureCursorVisible();
-      return KeyEventResult.handled;
-    }
-    if (logical == LogicalKeyboardKey.end) {
-      final lines = text.split('\n');
       _cntlr.selection = TextSelection.collapsed(
-        offset: oldOffset - _cursorColumn + lines[_cursorLine].length,
+        offset: oldOffset - _cursorColumn,
       );
       _ensureCursorVisible();
       return KeyEventResult.handled;
     }
-    if (logical == LogicalKeyboardKey.backspace || logical == LogicalKeyboardKey.delete) {
+    if (logical == LogicalKeyboardKey.end) {
+      _cntlr.selection = TextSelection.collapsed(
+        offset: oldOffset - _cursorColumn + _getLineLength(_cursorLine),
+      );
+      _ensureCursorVisible();
+      return KeyEventResult.handled;
+    }
+    if (logical == LogicalKeyboardKey.backspace ||
+        logical == LogicalKeyboardKey.delete) {
       _handleDelete(logical == LogicalKeyboardKey.delete);
       return KeyEventResult.handled;
     }
-    if (logical == LogicalKeyboardKey.enter || logical == LogicalKeyboardKey.numpadEnter) {
+    if (logical == LogicalKeyboardKey.enter ||
+        logical == LogicalKeyboardKey.numpadEnter) {
       _insertNewline();
       return KeyEventResult.handled;
     }
@@ -797,7 +848,7 @@ class _UTextEditorState extends State<UTextEditor>
 
   void _restartCursorBlink() {
     if (!_hasFocus) return;
-    _cursorVisibilityNotifier = true;
+    _cursorBlinkNotifier.value = true;
     _startCursorBlink();
   }
 
@@ -820,12 +871,7 @@ class _UTextEditorState extends State<UTextEditor>
   }
 
   void _setCursor((int line, int column) pos) {
-    int offset = 0;
-    final lines = _cntlr.text.split('\n');
-    for (int i = 0; i < pos.$1 && i < lines.length; i++) {
-      offset += lines[i].length + 1;
-    }
-    offset += pos.$2;
+    int offset = _lineStarts[pos.$1] + pos.$2;
     offset = offset.clamp(0, _cntlr.text.length);
     _beginBatchEdit();
     _cntlr.selection = TextSelection.collapsed(offset: offset);
@@ -839,20 +885,21 @@ class _UTextEditorState extends State<UTextEditor>
     if (widget.showLineNumbers) dx -= widget.lineNumberWidth;
     double dy = offset.dy - _padding.top + _scrollOffset;
 
-    final lines = _cntlr.text.split('\n');
-    int line = (dy / _lineHeightPx).floor().clamp(0, lines.length - 1);
+    int line = (dy / _lineHeightPx).floor().clamp(0, _lineStarts.length - 1);
 
-    final painter = _getOrCreateLinePainter(line, lines[line]);
+    final lineText = _getLineText(line);
+    final painter = _getOrCreateLinePainter(line, lineText);
     if (painter == null) return (line, 0);
 
     final pos = painter.getPositionForOffset(Offset(dx, _lineHeightPx / 2));
-    return (line, pos.offset.clamp(0, lines[line].length));
+    return (line, pos.offset.clamp(0, lineText.length));
   }
 
   TextPainter? _getOrCreateLinePainter(int lineIndex, String lineText) {
-    if (_lastTextForCache != _cntlr.text) {
+    if (_lastTextGeneration != _textGeneration || _lastTextWidth != _textWidth) {
       _clearPainterCache();
-      _lastTextForCache = _cntlr.text;
+      _lastTextGeneration = _textGeneration;
+      _lastTextWidth = _textWidth;
     }
     if (_linePainterCache.containsKey(lineIndex)) {
       return _linePainterCache[lineIndex]!;
@@ -871,13 +918,10 @@ class _UTextEditorState extends State<UTextEditor>
   @override
   Widget build(BuildContext context) {
     final theme = UTheme.of(context);
-    if (_lastTextForCache != _cntlr.text) {
-      _clearPainterCache();
-      _lastTextForCache = _cntlr.text;
-    }
     return Actions(
       actions: <Type, Action<Intent>>{
-        DoNothingAndStopPropagationTextIntent: DoNothingAction(consumesKey: false),
+        DoNothingAndStopPropagationTextIntent:
+            DoNothingAction(consumesKey: false),
         ReplaceTextIntent: CallbackAction<ReplaceTextIntent>(
           onInvoke: _handleReplaceText,
         ),
@@ -896,10 +940,12 @@ class _UTextEditorState extends State<UTextEditor>
         DeleteCharacterIntent: CallbackAction<DeleteCharacterIntent>(
           onInvoke: _handleDeleteIntent,
         ),
-        ExtendSelectionByCharacterIntent: CallbackAction<ExtendSelectionByCharacterIntent>(
+        ExtendSelectionByCharacterIntent:
+            CallbackAction<ExtendSelectionByCharacterIntent>(
           onInvoke: _handleExtendSelectionByCharacter,
         ),
-        ExtendSelectionVerticallyToAdjacentLineIntent: CallbackAction<ExtendSelectionVerticallyToAdjacentLineIntent>(
+        ExtendSelectionVerticallyToAdjacentLineIntent:
+            CallbackAction<ExtendSelectionVerticallyToAdjacentLineIntent>(
           onInvoke: _handleExtendSelectionVertically,
         ),
         SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
@@ -930,20 +976,28 @@ class _UTextEditorState extends State<UTextEditor>
                     return SingleChildScrollView(
                       controller: _scrollController,
                       child: SizedBox(
-                        height: math.max(_contentHeight + _padding.vertical, _viewportHeight),
+                        height: math.max(
+                          _contentHeight + _padding.vertical,
+                          _viewportHeight,
+                        ),
                         width: double.infinity,
                         child: CustomPaint(
                           size: Size(
                             _viewportWidth,
-                            math.max(_contentHeight + _padding.vertical, _viewportHeight),
+                            math.max(
+                              _contentHeight + _padding.vertical,
+                              _viewportHeight,
+                            ),
                           ),
                           painter: _EditorPainter(
                             controller: _cntlr,
-                            cursorVisible: _cursorVisibilityNotifier && _hasFocus,
+                            lineStarts: _lineStarts,
+                            scrollController: _scrollController,
+                            cursorBlinkNotifier: _cursorBlinkNotifier,
+                            hasFocus: _hasFocus,
                             textStyle: _textStyle,
                             lineHeight: _lineHeightPx,
                             padding: _padding,
-                            scrollOffset: _scrollOffset,
                             viewportHeight: _viewportHeight,
                             textColor: _textColor,
                             showLineNumbers: widget.showLineNumbers,
@@ -953,6 +1007,7 @@ class _UTextEditorState extends State<UTextEditor>
                             lineNumberColor: _lineNumberColor,
                             textWidth: _textWidth,
                             getOrCreateLinePainter: _getOrCreateLinePainter,
+                            repaint: _repaintNotifier,
                           ),
                         ),
                       ),
@@ -979,12 +1034,16 @@ class _UTextEditorState extends State<UTextEditor>
         ),
       ),
       child: DefaultTextStyle(
-        style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: theme.secondary),
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          color: theme.secondary,
+        ),
         child: Row(
           children: [
             Text('行 ${_cursorLine + 1}, 列 ${_cursorColumn + 1}'),
             const Spacer(),
-            Text('共 $_totalLines 行'),
+            Text('共 ${_lineStarts.length} 行'),
           ],
         ),
       ),
@@ -996,11 +1055,13 @@ class _UTextEditorState extends State<UTextEditor>
 
 class _EditorPainter extends CustomPainter {
   final TextEditingController controller;
-  final bool cursorVisible;
+  final List<int> lineStarts;
+  final ScrollController scrollController;
+  final ValueNotifier<bool> cursorBlinkNotifier;
+  final bool hasFocus;
   final TextStyle textStyle;
   final double lineHeight;
   final EdgeInsets padding;
-  final double scrollOffset;
   final double viewportHeight;
   final Color textColor;
   final bool showLineNumbers;
@@ -1009,15 +1070,23 @@ class _EditorPainter extends CustomPainter {
   final Color lineNumberCurrentColor;
   final Color lineNumberColor;
   final double textWidth;
-  final TextPainter? Function(int lineIndex, String lineText) getOrCreateLinePainter;
+  final TextPainter? Function(int lineIndex, String lineText)
+      getOrCreateLinePainter;
+  final Listenable repaint;
+
+  final Map<int, TextPainter> _lineNumberCache = {};
+  int _lastCursorLine = -1;
+  int _lastTotalLines = -1;
 
   _EditorPainter({
     required this.controller,
-    required this.cursorVisible,
+    required this.lineStarts,
+    required this.scrollController,
+    required this.cursorBlinkNotifier,
+    required this.hasFocus,
     required this.textStyle,
     required this.lineHeight,
     required this.padding,
-    required this.scrollOffset,
     required this.viewportHeight,
     required this.textColor,
     required this.showLineNumbers,
@@ -1027,67 +1096,85 @@ class _EditorPainter extends CustomPainter {
     required this.lineNumberColor,
     required this.textWidth,
     required this.getOrCreateLinePainter,
-  });
+    required this.repaint,
+  }) : super(repaint: repaint);
 
-  int get _totalLines {
-    if (controller.text.isEmpty) return 1;
-    return '\n'.allMatches(controller.text).length + 1;
-  }
+  bool get _cursorVisible => hasFocus && cursorBlinkNotifier.value;
+
+  double get _scrollOffset =>
+      scrollController.hasClients ? scrollController.offset : 0.0;
 
   int get _cursorLine {
     final offset = controller.selection.baseOffset;
-    if (offset < 0) return 0;
-    final before = controller.text.substring(0, math.min(offset, controller.text.length));
-    return '\n'.allMatches(before).length;
+    if (offset < 0 || lineStarts.isEmpty) return 0;
+    int lo = 0, hi = lineStarts.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) ~/ 2;
+      if (lineStarts[mid] <= offset) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
   }
 
   int get _cursorColumn {
     final offset = controller.selection.baseOffset;
-    if (offset <= 0) return 0;
-    final lastNewline = controller.text.lastIndexOf('\n', offset - 1);
-    return offset - (lastNewline + 1);
+    if (offset <= 0 || lineStarts.isEmpty) return 0;
+    return offset - lineStarts[_cursorLine];
+  }
+
+  String _lineText(int i) {
+    final text = controller.text;
+    final start = lineStarts[i];
+    final end =
+        i < lineStarts.length - 1 ? lineStarts[i + 1] - 1 : text.length;
+    if (start > end) return '';
+    return text.substring(start, end);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final lines = controller.text.isEmpty ? <String>[''] : controller.text.split('\n');
-    final startLine = math.max(0, (scrollOffset / lineHeight).floor() - 2);
+    final so = _scrollOffset;
+    final startLine = math.max(0, (so / lineHeight).floor() - 2);
     final endLine = math.min(
-      lines.length,
-      ((scrollOffset + viewportHeight) / lineHeight).ceil() + 2,
+      lineStarts.length,
+      ((so + viewportHeight) / lineHeight).ceil() + 2,
     );
 
-    final textStartX = padding.left + (showLineNumbers ? lineNumberWidth : 0);
+    final textStartX =
+        padding.left + (showLineNumbers ? lineNumberWidth : 0);
 
     if (showLineNumbers) {
-      _paintLineNumbers(canvas, size, lines, startLine, endLine);
+      _paintLineNumbers(canvas, startLine, endLine);
     }
 
     for (int i = startLine; i < endLine; i++) {
       final y = padding.top + i * lineHeight;
-      if (y + lineHeight < scrollOffset - lineHeight ||
-          y > scrollOffset + viewportHeight + lineHeight) {
-        continue;
-      }
       canvas.save();
-      canvas.clipRect(Rect.fromLTWH(textStartX, y, textWidth, lineHeight + 1));
-      final painter = getOrCreateLinePainter(i, lines[i]);
+      canvas.clipRect(
+        Rect.fromLTWH(textStartX, y, textWidth, lineHeight + 1),
+      );
+      final lineText = _lineText(i);
+      final painter = getOrCreateLinePainter(i, lineText);
       if (painter != null) {
         painter.paint(canvas, Offset(textStartX, y));
       }
       canvas.restore();
     }
 
-    if (cursorVisible) {
-      _paintCursor(canvas, lines, textStartX);
+    if (_cursorVisible) {
+      _paintCursor(canvas, textStartX);
     }
   }
 
-  void _paintCursor(Canvas canvas, List<String> lines, double textStartX) {
+  void _paintCursor(Canvas canvas, double textStartX) {
     final cl = _cursorLine;
-    if (cl >= lines.length) return;
+    if (cl >= lineStarts.length) return;
 
-    final painter = getOrCreateLinePainter(cl, lines[cl]);
+    final lineText = _lineText(cl);
+    final painter = getOrCreateLinePainter(cl, lineText);
     if (painter == null) return;
 
     final caretPrototype = Rect.fromLTWH(0, 0, 1.5, lineHeight);
@@ -1109,38 +1196,53 @@ class _EditorPainter extends CustomPainter {
     );
   }
 
-  void _paintLineNumbers(
-    Canvas canvas,
-    Size size,
-    List<String> lines,
-    int startLine,
-    int endLine,
-  ) {
-    for (int i = startLine; i < endLine && i < _totalLines; i++) {
+  void _paintLineNumbers(Canvas canvas, int startLine, int endLine) {
+    final cl = _cursorLine;
+    final total = lineStarts.length;
+    if (cl != _lastCursorLine || total != _lastTotalLines) {
+      for (final p in _lineNumberCache.values) {
+        p.dispose();
+      }
+      _lineNumberCache.clear();
+      _lastCursorLine = cl;
+      _lastTotalLines = total;
+    }
+
+    for (int i = startLine; i < endLine && i < total; i++) {
       final y = padding.top + i * lineHeight;
-      if (y + lineHeight < scrollOffset - lineHeight ||
-          y > scrollOffset + viewportHeight + lineHeight) {
+      if (y + lineHeight < _scrollOffset - lineHeight ||
+          y > _scrollOffset + viewportHeight + lineHeight) {
         continue;
       }
 
-      final isCurrent = i == _cursorLine;
+      final isCurrent = i == cl;
       if (isCurrent) {
         final bgPaint = Paint()
           ..color = lineNumberCurrentColor.withValues(alpha: 0.1);
-        canvas.drawRect(Rect.fromLTWH(0, y, lineNumberWidth, lineHeight), bgPaint);
+        canvas.drawRect(
+          Rect.fromLTWH(0, y, lineNumberWidth, lineHeight),
+          bgPaint,
+        );
       }
 
-      final numPainter = TextPainter(
-        text: TextSpan(
-          text: '${i + 1}',
-          style: lineNumberStyle.copyWith(
-            color: isCurrent ? lineNumberCurrentColor : lineNumberColor,
+      TextPainter? numPainter = _lineNumberCache[i];
+      if (numPainter == null) {
+        numPainter = TextPainter(
+          text: TextSpan(
+            text: '${i + 1}',
+            style: lineNumberStyle.copyWith(
+              color: isCurrent ? lineNumberCurrentColor : lineNumberColor,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.right,
-      );
-      numPainter.layout(minWidth: lineNumberWidth - 8, maxWidth: lineNumberWidth - 8);
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.right,
+        );
+        numPainter.layout(
+          minWidth: lineNumberWidth - 8,
+          maxWidth: lineNumberWidth - 8,
+        );
+        _lineNumberCache[i] = numPainter;
+      }
       numPainter.paint(canvas, Offset(0, y));
     }
   }
