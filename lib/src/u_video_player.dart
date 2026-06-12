@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/src/gestures/events.dart';
-
 class UVideoPlayer extends StatefulWidget {
   const UVideoPlayer({
     super.key,
@@ -21,6 +19,10 @@ class UVideoPlayer extends StatefulWidget {
     required this.onProgressDragEnd,
     required this.onProgressDragUpdate,
     required this.onProgressTapDown,
+    this.onVerticalDragUpdate,
+    this.onVerticalDragEnd,
+    this.onHorizontalDragUpdate,
+    this.onHorizontalDragEnd,
     this.center,
     this.hubDuration = const Duration(seconds: 3),
   });
@@ -63,6 +65,14 @@ class UVideoPlayer extends StatefulWidget {
   onProgressDragUpdate;
 
   final ValueChanged<double>? onProgressTapDown;
+
+  final void Function(DragUpdateDetails)? onVerticalDragUpdate;
+
+  final void Function(DragEndDetails)? onVerticalDragEnd;
+
+  final void Function(DragUpdateDetails)? onHorizontalDragUpdate;
+
+  final void Function(DragEndDetails)? onHorizontalDragEnd;
 }
 
 class _UVideoPlayerState extends State<UVideoPlayer> {
@@ -123,18 +133,10 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
           ),
         ),
         GestureDetector(
-          onHorizontalDragUpdate: (details) {
-            print(details);
-          },
-          onHorizontalDragEnd: (details) {
-            print(details);
-          },
-          onVerticalDragUpdate: (details) {
-            print(details);
-          },
-          onVerticalDragEnd: (details) {
-            print(details);
-          },
+          onHorizontalDragUpdate: widget.onHorizontalDragUpdate,
+          onHorizontalDragEnd: widget.onHorizontalDragEnd,
+          onVerticalDragUpdate: widget.onVerticalDragUpdate,
+          onVerticalDragEnd: widget.onVerticalDragEnd,
           onDoubleTapDown: widget.onDoubleTapDown,
           onTap: _deviceKind == PointerDeviceKind.mouse
               ? widget.onTogglePlay
