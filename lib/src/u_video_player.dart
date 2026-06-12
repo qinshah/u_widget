@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+
 class UVideoPlayer extends StatefulWidget {
   const UVideoPlayer({
     super.key,
@@ -51,7 +52,6 @@ class UVideoPlayer extends StatefulWidget {
 
   final WidgetBuilder? centerLeft;
 
-  /// 中心Hub, 仅在水平拖拽进度时显示, [progress] 为当前拖拽进度 0.0 ~ 1.0
   final Widget Function(BuildContext context, double progress)? center;
 
   final Duration hubDuration;
@@ -143,6 +143,10 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
               : _taggleHub,
           onTapDown: (details) => _deviceKind = details.kind,
         ),
+        Align(
+          alignment: Alignment.center,
+          child: widget.center?.call(context, _dragProgress),
+        ),
         if (_hubTimer.isActive)
           Stack(
             children: [
@@ -154,11 +158,6 @@ class _UVideoPlayerState extends State<UVideoPlayer> {
                 alignment: Alignment.centerRight,
                 child: widget.centerRight?.call(context),
               ),
-              if (_isDraggingProgress && widget.center != null)
-                Align(
-                  alignment: Alignment.center,
-                  child: widget.center!.call(context, _dragProgress),
-                ),
               Positioned(
                 top: 0,
                 left: 0,
